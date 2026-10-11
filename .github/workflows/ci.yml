@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: ffmpeg (encodes the test clips) and libbluray (plays the discs back)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libbluray2
+      - name: Tests (every test runs here; none may be skipped)
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -t . -v 2>&1 | tee tests.log
+          ! grep -n "\.\.\. skipped" tests.log
+      - name: Package builds
+        run: |
+          python -m pip install build
+          python -m build
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Tests (no external tools)
+        run: python -m unittest discover -s tests -t . -v

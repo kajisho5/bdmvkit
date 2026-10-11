@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bdmvkit"
+version = "0.1.0"
+description = "Blu-ray (BDMV) authoring in pure Python: playlists, clip information, HDMV navigation, PGS subtitles"
+readme = "README.md"
+license = "LGPL-3.0-or-later"
+license-files = ["COPYING", "COPYING.LESSER"]
+requires-python = ">=3.11"
+dependencies = []
+authors = [{ name = "kajisho5" }]
+keywords = ["blu-ray", "bdmv", "mpls", "clpi", "hdmv", "pgs", "authoring"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Topic :: Multimedia :: Video",
+]
+
+[project.urls]
+Homepage = "https://github.com/kajisho5/bdmvkit"
+
+[project.scripts]
+bdmvkit = "bdmvkit.__main__:main"
+
+[tool.setuptools]
+packages = ["bdmvkit"]
