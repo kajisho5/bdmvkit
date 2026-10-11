@@ -1,3 +1,5 @@
+<p><img src="docs/images/logo/lockup-dark.svg" alt="bdmvkit" height="56"></p>
+
 # bdmvkit
 
 **Python だけで Blu-ray（BDMV）をオーサリングするライブラリです。** Blu-ray プレーヤーがディスクを操作するときに読むファイルを書き出します。
@@ -85,6 +87,12 @@ python -m unittest discover -s tests -t .
 * メニューのボタンをリモコンのキーで選んで決定し、タイトル・チャプター・別のメニューへ移ること
 
 ファイルのうち内容が決まっているバイトも確かめています。
+
+## 支援する
+
+bdmvkit は無料で、これからも無料です。役に立ったら [GitHub Sponsors](https://github.com/sponsors/kajisho5)（このリポジトリ上部の **Sponsor** ボタン）から開発を支援できます。不具合の報告も同じくらい助かります：[Issues](https://github.com/kajisho5/bdmvkit/issues)。
+
+ロゴ・色・文章の決まりは [docs/DESIGN.md](docs/DESIGN.md)（英語）にあります。
 
 ## ライセンス
 
