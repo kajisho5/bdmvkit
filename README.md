@@ -34,8 +34,14 @@ every disc back with libbluray.
 ## Install
 
 ```sh
-pip install git+https://github.com/kajisho5/bdmvkit
+pip install bdmvkit
 ```
+
+A release is made by the version: when the version in `pyproject.toml`
+(and `bdmvkit/__init__.py`) reaches `main` without a tag of its own,
+`.github/workflows/release.yml` runs the tests, builds the package, makes
+the GitHub release with its tag and publishes to PyPI (trusted publishing,
+environment `pypi`). Merging the version bump is all it takes.
 
 ## Use
 
