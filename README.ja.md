@@ -5,11 +5,12 @@
 * チャプターマーク付きのプレイリスト（`.mpls`）
 * プレーヤーがシーク（再生位置の移動）に使う位置表付きのクリップ情報（`.clpi`）
 * HDMV のナビゲーション命令を入れた `index.bdmv` と `MovieObject.bdmv`
+* メニュー：ボタン、ボタン間の矢印キーの移動先、ボタンが実行する命令を入れた Interactive Graphics ストリーム
 * PGS 字幕ストリーム（`.sup`）
 
 ffmpeg と x264 を使い、Blu-ray 向けの設定でクリップをエンコードする機能もあります。標準ライブラリ以外に依存せず、ffmpeg が必要なのはエンコードのときだけです。
 
-**状態：0.1。** チャプター・音声・字幕付きのタイトルを順に再生するディスクを作れます。次は HDMV メニュー（Interactive Graphics：ボタン、ポップアップメニュー）を入れます。メニューは元になった [oncemore](https://github.com/kajisho5/oncemore) ではすでに動いていて、こちらへ移している途中です。
+**状態：0.2。** チャプター・音声・字幕付きのタイトルと、ボタンでタイトル・チャプター・別のメニューへ移るメニューを作れます。次はポップアップメニュー（再生中のタイトルの上に出るメニュー）と、動きや音楽のあるメニューです。これらは元になった [oncemore](https://github.com/kajisho5/oncemore) ではすでに動いています。
 
 ## なぜ作ったか
 
@@ -38,6 +39,22 @@ disc.add_title("extras.m2ts", fps=(25, 1))
 disc.write("out")                       # out/BDMV/...
 ```
 
+メニューは 1 枚の画像とボタンでできています。ボタンは、選択されたときの見た目の画像（指定すれば決定したとき・選択される前の画像も）を 1920 × 1080 のメニュー上の位置に置き、リンク先を付けます。
+
+```python
+from bdmvkit import Disc, MenuButton
+
+disc = Disc()
+disc.add_title("feature.m2ts", chapters=[0, 300, 600], end="menu:main")
+disc.add_menu("main", "menu.png", [
+    MenuButton("play", 160, 700, "play-lit.png", "play-on.png", action="title:1"),
+    MenuButton("scene2", 160, 800, "scene2-lit.png", action="chapter:1:2"),
+])
+disc.write("out")
+```
+
+リンク先は `title:<n>`、`chapter:<n>:<c>`、`menu:<id>` です。タイトルの `end`（再生が終わったときの移動先）も同じ書き方です。矢印キーは、ボタンの `nav`（`{"down": "scene2"}`）で指定しない限り、その方向でいちばん近いボタンへ移ります。ボタンのストリームだけを作る `bdmvkit.igs` は、ほかのツールからも使えます。
+
 ```sh
 bdmvkit encode feature.mov feature.m2ts --chapters 0,300,600
 bdmvkit build disc.json out
@@ -48,7 +65,8 @@ bdmvkit build disc.json out
 * フレームレートは 23.976（1080p）、25、29.97 です。25 と 29.97 は、規格に合わせて 1080i のストリームにプログレッシブのフレームとして入れます。
 * 音声は AC-3、LPCM、DTS です。
 * 字幕はクリップに多重化した PGS ストリームです。`pgs.write_sup` で画像から作り、`encode_clip(..., sups=[...])` で入れます。
-* ディスクを入れたときと、トップメニューキーを押したときは、タイトル 1 から再生します。
+* ディスクを入れたときとトップメニューキーを押したときは、最初のメニューを開きます（メニューが無ければタイトル 1 を再生）。
+* メニューはタイトルの後に並ぶインタラクティブなタイトルです。画像を静止画として表示し、ボタンはそのクリップに入れた Interactive Graphics ストリームです。メニューはディスクを書き出すときにエンコードします（ffmpeg）。
 
 フォルダからディスクイメージを作るには [udfkit](https://github.com/kajisho5/udfkit)（UDF 2.50）を使ってください：`udfkit bluray out disc.iso --label MY_DISC`。
 
@@ -64,6 +82,7 @@ python -m unittest discover -s tests -t .
 * チャプターの位置
 * 映像・音声・字幕のストリームと言語
 * ディスクを入れたところから再生して、タイトルとチャプターを順にたどれること
+* メニューのボタンをリモコンのキーで選んで決定し、タイトル・チャプター・別のメニューへ移ること
 
 ファイルのうち内容が決まっているバイトも確かめています。
 

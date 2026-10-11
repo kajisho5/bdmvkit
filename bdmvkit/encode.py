@@ -12,8 +12,8 @@ import shutil
 import subprocess
 
 from .errors import BdmvError
-from .formats import (AUDIO_PID, FORMATS, HEIGHT, PG_PID, PMT_PID, VBV_BUFFER, VIDEO_PID, WIDTH,
-                      MAX_VIDEO_BPS)
+from .formats import (AUDIO_PID, FORMATS, HEIGHT, IG_PID, MAX_VIDEO_BPS, PG_PID, PMT_PID,
+                      VBV_BUFFER, VIDEO_PID, WIDTH)
 
 
 def video_args(fps, max_bps=MAX_VIDEO_BPS, fast=False, keys=()):
@@ -99,3 +99,54 @@ def _has_audio(source, ffmpeg):
     p = subprocess.run([probe, "-v", "error", "-select_streams", "a", "-show_entries",
                         "stream=index", "-of", "csv=p=0", source], capture_output=True, text=True)
     return bool(p.stdout.strip())
+
+
+def picture(path, size=None, ffmpeg=None):
+    """A picture file (PNG, JPEG ...) as (width, height, RGBA bytes), scaled
+    to `size` (w, h) when given."""
+    ffmpeg = ffmpeg or shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise BdmvError("reading pictures needs ffmpeg")
+    if size is None:
+        probe = shutil.which("ffprobe") or ffmpeg.replace("ffmpeg", "ffprobe")
+        p = subprocess.run([probe, "-v", "error", "-select_streams", "v:0", "-show_entries",
+                            "stream=width,height", "-of", "csv=p=0", path],
+                           capture_output=True, text=True)
+        try:
+            w, h = (int(v) for v in p.stdout.strip().split(",")[:2])
+        except ValueError:
+            raise BdmvError(f"cannot read the picture {path}")
+    else:
+        w, h = size
+    p = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-i", path,
+                        "-frames:v", "1", "-vf", f"scale={w}:{h}", "-f", "rawvideo",
+                        "-pix_fmt", "rgba", "-"], capture_output=True)
+    if p.returncode != 0 or len(p.stdout) != w * h * 4:
+        why = p.stderr.decode(errors="replace")[-300:]
+        raise BdmvError(f"cannot read the picture {path}: {why}")
+    return w, h, p.stdout
+
+
+def encode_menu(background, sup, out, fps=(24000, 1001), seconds=1.0, fast=False, ffmpeg=None):
+    """A menu clip: the picture `background` (fitted into the HD frame) for
+    `seconds`, with the IG stream `sup` (igs.ig_stream) as its buttons; the
+    playlist holds its last picture."""
+    ffmpeg = ffmpeg or shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise BdmvError("encoding needs ffmpeg (with libx264)")
+    from .igs import patch_ig_stream_type
+    num, den = fps
+    cmd = [ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-y",
+           "-loop", "1", "-framerate", f"{num}/{den}", "-t", f"{seconds:.3f}", "-i", background,
+           "-f", "sup", "-i", sup,
+           "-filter_complex", f"[0:v]{fit_filter(fps)},format=yuv420p[v]",
+           "-map", "[v]", "-map", "1:0"] + video_args(fps, MAX_VIDEO_BPS, fast) + \
+        ["-c:s", "copy", "-streamid", f"0:{VIDEO_PID}", "-streamid", f"1:{IG_PID}",
+         "-t", f"{seconds:.3f}", "-f", "mpegts", "-mpegts_m2ts_mode", "1",
+         "-mpegts_pmt_start_pid", str(PMT_PID), out]
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise BdmvError(f"ffmpeg could not encode the menu {background}: "
+                        f"{p.stderr.strip()[-800:]}")
+    patch_ig_stream_type(out)
+    return out
