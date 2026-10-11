@@ -1,0 +1,105 @@
+name: Release
+
+# A release is made when the version in pyproject.toml reaches main
+# without a tag yet (merge the version bump, nothing else to do), when
+# "Run workflow" is pressed on main, or when a tag v* is pushed. The run
+# tests with every tool, builds the sdist and the wheel, checks them,
+# makes a GitHub release of the tag (creating the tag from the commit on
+# main when there is none; adding the files when the release was made on
+# GitHub first), and publishes to PyPI through trusted publishing: PyPI
+# knows this repository and workflow as the project's publisher (owner
+# kajisho5, repository bdmvkit, workflow release.yml, environment pypi).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.decide.outputs.tag }}
+      release: ${{ steps.decide.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: The version, and whether it is released already
+        id: decide
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)
+          grep -q "^__version__ = \"$version\"" bdmvkit/__init__.py || { echo "bdmvkit/__init__.py is not at $version"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "tag $GITHUB_REF_NAME is not v$version"; exit 1; }
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --tags origin "refs/tags/v$version" | grep -q .; then
+            echo "v$version is tagged already: nothing to release"
+            echo "tag=v$version" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$version" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tests (ffmpeg and libbluray installed; none skipped)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libbluray2
+          set -o pipefail
+          python -m unittest discover -s tests -t . -v 2>&1 | tee tests.log
+          ! grep -n "\.\.\. skipped" tests.log
+      - name: Build and check
+        run: |
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  github-release:
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: The release of the tag, with the files (the tag made here when there is none)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "bdmvkit $TAG" --generate-notes
+          fi
+
+  pypi:
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
