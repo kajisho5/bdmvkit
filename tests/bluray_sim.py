@@ -145,6 +145,8 @@ def load_library():
         lib.bd_menu_call.restype = ctypes.c_int
         lib.bd_menu_call.argtypes = [P, ctypes.c_int64]
         lib.bd_read_skip_still.restype, lib.bd_read_skip_still.argtypes = ctypes.c_int, [P]
+        lib.bd_get_current_chapter.restype = u32
+        lib.bd_get_current_chapter.argtypes = [P]
         # (its notes about the end of the disc would fill the test output)
         lib.bd_set_debug_mask.argtypes = [u32]
         lib.bd_set_debug_mask(0)
@@ -228,8 +230,9 @@ class Disc:
         whenever the disc waits (a menu); "topmenu" is pressed while a title
         plays (once some of it was read); returns the navigation events in
         order as (name, value), with ("key", name) where a key was pressed
-        and ("menu", button graphics drawn) after each key; with `audio`,
-        also ("audio_stream", n) when the audio stream changes."""
+        and ("menu", button graphics drawn) after each key, ("at_chapter", n)
+        where the picture of a playlist begins; with `audio`, also
+        ("audio_stream", n) when the audio stream changes."""
         names = {BD_EVENT_TITLE: "title", BD_EVENT_PLAYLIST: "playlist",
                  BD_EVENT_CHAPTER: "chapter", BD_EVENT_END_OF_TITLE: "end",
                  **({BD_EVENT_AUDIO_STREAM: "audio_stream"} if audio else {}),
@@ -245,7 +248,7 @@ class Disc:
         keys = list(keys)
         buf = ctypes.create_string_buffer(6144 * 16)
         ev = Event()
-        out, read, idle, waiting, since = [], 0, 0, 0, 0
+        out, read, idle, waiting, since, started = [], 0, 0, 0, 0, False
         for _ in range(100000):     # (a bound, should the disc never end)
             if read >= max_bytes:
                 break
@@ -255,6 +258,10 @@ class Disc:
                 break
             read += n
             since += n
+            if n > 0 and started:
+                # where a playlist's picture began: its chapter (1-based)
+                out.append(("at_chapter", self.lib.bd_get_current_chapter(self.bd) + 1))
+                started = False
             if keys and keys[0] == "topmenu" and since > 300_000:
                 out.append(("key", keys.pop(0)))
                 self.lib.bd_menu_call(self.bd, -1)
@@ -276,6 +283,8 @@ class Disc:
                 self.lib.bd_read_skip_still(self.bd)
                 continue
             item = (names.get(ev.event), ev.param)
+            if item[0] == "playlist":
+                started = True
             # (the end of the last title is reported on every read after it)
             if item[0] and not (item[0] == "end" and out and out[-1] == item):
                 out.append(item)

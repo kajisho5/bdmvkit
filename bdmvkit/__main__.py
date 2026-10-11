@@ -4,8 +4,12 @@
     bdmvkit build DISC.json OUT_DIR
 
 DISC.json: {"titles": [{"clip": "a.m2ts", "fps": "24000/1001",
-"chapters": [0, 60], "audio": [["ac3", 2, "en"]], "subtitles": ["ja"]}],
-"play_all": true}; paths are relative to the JSON file.
+"chapters": [0, 60], "audio": [["ac3", 2, "en"]], "subtitles": ["ja"],
+"end": "menu:main"}], "menus": [{"id": "main", "background": "menu.png",
+"buttons": [{"id": "play", "x": 160, "y": 700, "selected": "play.png",
+"action": "title:1"}]}], "play_all": true}; paths are relative to the JSON
+file. A button may also have "activated" and "normal" pictures, "nav"
+({"up": id, ...}) and "auto"; a menu "default" (a button id) and "fps".
 """
 
 import argparse
@@ -14,7 +18,7 @@ import os
 import sys
 
 from . import __version__
-from .disc import Disc
+from .disc import Disc, MenuButton
 from .encode import encode_clip
 from .errors import BdmvError
 
@@ -38,9 +42,10 @@ def main(argv=None):
     s.add_argument("--fps", default="24000/1001", help="24000/1001, 25 or 30000/1001")
     s.add_argument("--chapters", help="chapter starts in seconds, e.g. 0,60,120")
     s.add_argument("--fast", action="store_true", help="quick, lower-quality encoding")
-    s = sub.add_parser("build", help="write a BDMV folder from encoded clips")
+    s = sub.add_parser("build", help="write a BDMV folder from encoded clips and menus")
     s.add_argument("disc", help="the disc description (JSON)")
     s.add_argument("out", help="the folder to write BDMV into")
+    s.add_argument("--fast", action="store_true", help="quick encoding of the menus")
     args = p.parse_args(argv)
     try:
         if args.command == "encode":
@@ -56,12 +61,24 @@ def main(argv=None):
             disc.add_title(os.path.join(base, t["clip"]), fps=_fps(t.get("fps", "24000/1001")),
                            chapters=t.get("chapters", [0]),
                            audio=[tuple(a) for a in t.get("audio", [["ac3", 2, "und"]])],
-                           subtitles=t.get("subtitles", []))
-        res = disc.write(args.out, play_all=spec.get("play_all", True))
+                           subtitles=t.get("subtitles", []), end=t.get("end"))
+
+        def file(name):
+            return os.path.join(base, name) if name else None
+
+        for m in spec.get("menus", []):
+            disc.add_menu(m["id"], file(m["background"]), [
+                MenuButton(b["id"], int(b["x"]), int(b["y"]), file(b["selected"]),
+                           file(b.get("activated")), file(b.get("normal")), b.get("action"),
+                           dict(b.get("nav", {})), bool(b.get("auto")))
+                for b in m["buttons"]], fps=_fps(m.get("fps", "24000/1001")),
+                default=m.get("default"))
+        res = disc.write(args.out, play_all=spec.get("play_all", True), fast=args.fast)
     except (BdmvError, OSError, KeyError, ValueError) as e:
         print(f"bdmvkit: {getattr(e, 'message', e)}", file=sys.stderr)
         return 1
-    print(f"{args.out}: {res['titles']} title(s), chapters {res['chapters']}")
+    print(f"{args.out}: {res['titles']} title(s), {res['menus']} menu(s), "
+          f"chapters {res['chapters']}")
     return 0
 
 
