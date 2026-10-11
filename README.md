@@ -1,3 +1,5 @@
+<p><img src="docs/images/logo/lockup-dark.svg" alt="bdmvkit" height="56"></p>
+
 # bdmvkit
 
 **Blu-ray (BDMV) authoring in pure Python.** bdmvkit writes the files a
@@ -122,6 +124,15 @@ The tests encode real clips, write a disc, and read it back with
   the titles, chapters and menus they link to.
 
 The files' fixed bytes are checked as well.
+
+## Support
+
+bdmvkit is free and stays free. If it saves you time, you can support its
+development through [GitHub Sponsors](https://github.com/sponsors/kajisho5)
+(the **Sponsor** button at the top of this repository). Bug reports help just
+as much: [Issues](https://github.com/kajisho5/bdmvkit/issues).
+
+The logo, colours and writing rules: [docs/DESIGN.md](docs/DESIGN.md).
 
 ## License
 
