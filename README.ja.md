@@ -43,6 +43,21 @@ disc.add_title("extras.m2ts", fps=(25, 1))
 disc.write("out")                       # out/BDMV/...
 ```
 
+1 つのクリップに複数の音声トラックを入れられます。映像ファイル自身の音声でも別のファイルでもよく、k 番目のトラックがタイトルの k 番目の音声トラックになります（音声の無いファイルは無音、映像より短い音声は無音で埋めます）。
+
+```python
+from bdmvkit.encode import AudioTrack
+
+encode_clip("feature.mov", "feature.m2ts", audio=[
+    AudioTrack(),                                   # 映像ファイル自身の音声、AC-3
+    AudioTrack("commentary.wav", "lpcm"),           # 別のファイル、LPCM
+    AudioTrack("feature.mov", "ac3", 6, stream=1),  # 2 本目の音声ストリーム、5.1ch
+])
+disc.add_title("feature.m2ts", audio=[("ac3", 2, "en"), ("lpcm", 2, "en"), ("ac3", 6, "ja")])
+```
+
+`Disc.write` は、タイトルが宣言したトラックがすべてクリップにあるかを確かめます。
+
 メニューは 1 枚の画像とボタンでできています。ボタンは、選択されたときの見た目の画像（指定すれば決定したとき・選択される前の画像も）を 1920 × 1080 のメニュー上の位置に置き、リンク先を付けます。
 
 ```python

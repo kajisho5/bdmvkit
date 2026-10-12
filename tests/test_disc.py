@@ -9,8 +9,9 @@ import tempfile
 import unittest
 
 from bdmvkit import BdmvError, Disc, pgs
-from bdmvkit.encode import encode_clip
-from bdmvkit.formats import CODING_AC3, CODING_PG
+from bdmvkit.encode import AudioTrack, encode_clip
+from bdmvkit.formats import AUDIO_PID, CODING_AC3, CODING_LPCM, CODING_PG
+from bdmvkit.m2ts import stream_pids
 
 try:
     from . import bluray_sim
@@ -112,6 +113,71 @@ class TestDisc(unittest.TestCase):
         disc = Disc()
         disc.add_title(os.path.join(self.out, "BDMV", "STREAM", "00002.m2ts"), fps=(25, 1))
         self.assertEqual(disc.write(out, play_all=False)["titles"], 1)
+
+
+@unittest.skipUnless(ENCODE_OK, "needs ffmpeg with libx264")
+class TestAudioTracks(unittest.TestCase):
+    """Several sound tracks: from the video, from other files, silence."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = d = tempfile.mkdtemp(prefix="bdmvkit-audio-")
+        video = source(os.path.join(d, "v.mp4"), 3)
+        other = os.path.join(d, "other.wav")      # shorter than the picture
+        subprocess.run(["ffmpeg", "-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i",
+                        "sine=frequency=660:d=1.5:r=48000", other], check=True)
+        quiet = source(os.path.join(d, "quiet.mp4"), 3, tone=False)
+        cls.clip = encode_clip(video, os.path.join(d, "v.m2ts"), fast=True, audio=[
+            AudioTrack(), AudioTrack(other, "lpcm"), AudioTrack(quiet, "ac3", 6)])
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def probe(self, path):
+        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                              "stream=id,codec_name,channels,duration", "-of", "json", path],
+                             capture_output=True, text=True, check=True).stdout
+        return {int(s["id"], 16): s for s in __import__("json").loads(out)["streams"]}
+
+    def test_each_track_with_its_pid(self):
+        pids = stream_pids(self.clip)
+        self.assertEqual([pid for pid in pids if pid >= AUDIO_PID], [AUDIO_PID + k for k in range(3)])
+        streams = self.probe(self.clip)
+        self.assertEqual([(streams[AUDIO_PID + k]["codec_name"], streams[AUDIO_PID + k]["channels"])
+                          for k in range(3)],
+                         [("ac3", 2), ("pcm_bluray", 2), ("ac3", 6)])
+
+    def test_tracks_last_as_long_as_the_picture(self):
+        # (the 1.5 s sound is made up with silence; the clip still ends with the picture)
+        streams = self.probe(self.clip)
+        video = float(streams[0x1011]["duration"])
+        self.assertAlmostEqual(video, 3, delta=0.1)
+        for k in range(3):
+            self.assertAlmostEqual(float(streams[AUDIO_PID + k]["duration"]), video, delta=0.15)
+
+    @unittest.skipUnless(LIBBLURAY, "needs libbluray")
+    def test_declared_and_read_back(self):
+        out = os.path.join(self.tmp, "disc")
+        disc = Disc()
+        disc.add_title(self.clip, audio=[("ac3", 2, "en"), ("lpcm", 2, "ja"), ("ac3", 6, "fr")])
+        disc.write(out)
+        with bluray_sim.Disc(LIBBLURAY, out) as d:
+            a = d.playlist(1)
+        self.assertEqual(a["audio"], [(CODING_AC3, 3, "eng"), (CODING_LPCM, 3, "jpn"),
+                                      (CODING_AC3, 6, "fre")])
+
+    def test_a_track_the_clip_lacks_is_refused(self):
+        disc = Disc()
+        disc.add_title(self.clip, audio=[("ac3", 2, "en")] * 4)
+        with self.assertRaises(BdmvError) as cm:
+            disc.write(os.path.join(self.tmp, "bad"))
+        self.assertIn("audio track 4", str(cm.exception))
+        disc = Disc()
+        disc.add_title(self.clip, subtitles=["en"])
+        with self.assertRaises(BdmvError) as cm:
+            disc.write(os.path.join(self.tmp, "bad2"))
+        self.assertIn("subtitle track 1", str(cm.exception))
 
 
 class TestChecks(unittest.TestCase):

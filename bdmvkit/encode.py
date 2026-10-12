@@ -8,6 +8,7 @@ PIDs the playlists name. 25 and 29.97 fps become progressive frames in an
 interlaced (1080i) stream, as the format has no 1080p at those rates.
 """
 
+import dataclasses
 import shutil
 import subprocess
 
@@ -59,44 +60,100 @@ def fit_filter(fps):
             f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps[0]}/{fps[1]}")
 
 
+@dataclasses.dataclass
+class AudioTrack:
+    """A sound track of a clip: the audio stream `stream` of `source` (None:
+    the video file itself), encoded as `codec` ("ac3", "lpcm" or "copy")."""
+    source: str = None
+    codec: str = "ac3"
+    channels: int = 2
+    stream: int = 0
+    bitrate: int = None
+
+
 def encode_clip(source, out, fps=(24000, 1001), chapters=(), audio="ac3", channels=2,
                 sups=(), max_bps=MAX_VIDEO_BPS, fast=False, ffmpeg=None):
-    """Encode `source` (any video ffmpeg reads) into the Blu-ray clip `out`:
-    its first audio stream, or silence when it has none. `chapters`: times
-    (s) that become key frames, so chapter marks land on them. `sups`: PGS
-    streams (.sup, e.g. from pgs.write_sup) muxed in as subtitle tracks."""
+    """Encode `source` (any video ffmpeg reads) into the Blu-ray clip `out`.
+    `audio`: a codec ("ac3", "lpcm", "copy") for one track of the first audio
+    stream of `source`, or a list of AudioTracks, one track each (track k
+    gets the PID AUDIO_PID + k, as Disc.add_title's `audio` numbers them). A
+    file without sound gives silence, and encoded sound shorter than the
+    picture is made up with silence; the clip ends with the picture.
+    `chapters`: times (s) that become key frames, so
+    chapter marks land on them. `sups`: PGS streams (.sup, e.g. from
+    pgs.write_sup) muxed in as subtitle tracks."""
     ffmpeg = ffmpeg or shutil.which("ffmpeg")
     if not ffmpeg:
         raise BdmvError("encoding needs ffmpeg (with libx264)")
+    tracks = [AudioTrack(None, audio, channels)] if isinstance(audio, str) else list(audio)
+    if not tracks:
+        raise BdmvError("a clip needs at least one audio track")
     cmd = [ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-y", "-i", source]
-    if _has_audio(source, ffmpeg):
-        sound = ["-map", "0:a:0"]
-    else:
-        cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
-        sound = ["-map", "1:a:0", "-shortest"]
+    inputs = {None: 0}             # file (None: source, "": silence) -> input number
+
+    def input_of(key, args):
+        if key not in inputs:
+            inputs[key] = cmd.count("-i")
+            cmd.extend(args)
+        return inputs[key]
+
+    graph, sound, codecs = [f"[0:v:0]{fit_filter(fps)}[v]"], [], []
+    for k, tr in enumerate(tracks):
+        if not _has_audio(tr.source or source, ffmpeg, tr.stream):
+            if tr.codec == "copy":
+                raise BdmvError(f"{tr.source or source} has no audio stream {tr.stream} to copy")
+            n = input_of("", ["-f", "lavfi", "-i",
+                              "anullsrc=channel_layout=stereo:sample_rate=48000"])
+            sound += ["-map", f"{n}:a:0"]
+        elif tr.codec == "copy":
+            sound += ["-map", f"{input_of(tr.source, ['-i', tr.source])}:a:{tr.stream}"]
+        else:
+            # padded with silence: the picture alone decides where the clip ends
+            n = input_of(tr.source, ["-i", tr.source])
+            graph.append(f"[{n}:a:{tr.stream}]apad[a{k}]")
+            sound += ["-map", f"[a{k}]"]
+        codecs += audio_args(tr.codec, tr.channels, k, tr.bitrate)
     first_sup = cmd.count("-i")
     for sup in sups:
         cmd += ["-i", sup]
-    cmd += ["-filter_complex", f"[0:v:0]{fit_filter(fps)}[v]", "-map", "[v]"] + sound
+    cmd += ["-filter_complex", ";".join(graph), "-map", "[v]"] + sound
     for k in range(len(sups)):
         cmd += ["-map", f"{first_sup + k}:s:0"]
-    cmd += video_args(fps, max_bps, fast, [t for t in chapters if t > 0])
-    cmd += audio_args(audio, channels)
+    cmd += video_args(fps, max_bps, fast, [t for t in chapters if t > 0]) + codecs
     if sups:
         cmd += ["-c:s", "copy"]
-    cmd += ["-streamid", f"0:{VIDEO_PID}", "-streamid", f"1:{AUDIO_PID}"]
+    cmd += ["-streamid", f"0:{VIDEO_PID}"]
+    for k in range(len(tracks)):
+        cmd += ["-streamid", f"{1 + k}:{AUDIO_PID + k}"]
     for k in range(len(sups)):
-        cmd += ["-streamid", f"{2 + k}:{PG_PID + k}"]
-    cmd += ["-f", "mpegts", "-mpegts_m2ts_mode", "1", "-mpegts_pmt_start_pid", str(PMT_PID), out]
+        cmd += ["-streamid", f"{1 + len(tracks) + k}:{PG_PID + k}"]
+    # the picture's length ends the clip (ffmpeg's -shortest does not stop
+    # reliably with padded sound from a filter graph)
+    cmd += ["-t", f"{_duration(source, ffmpeg):.3f}", "-f", "mpegts", "-mpegts_m2ts_mode", "1",
+            "-mpegts_pmt_start_pid", str(PMT_PID), out]
     p = subprocess.run(cmd, capture_output=True, text=True)
     if p.returncode != 0:
         raise BdmvError(f"ffmpeg could not encode {source}: {p.stderr.strip()[-800:]}")
     return out
 
 
-def _has_audio(source, ffmpeg):
+def _duration(source, ffmpeg):
+    """Seconds of the first video stream of `source` (or of the file)."""
     probe = shutil.which("ffprobe") or ffmpeg.replace("ffmpeg", "ffprobe")
-    p = subprocess.run([probe, "-v", "error", "-select_streams", "a", "-show_entries",
+    for entries in (["-select_streams", "v:0", "-show_entries", "stream=duration"],
+                    ["-show_entries", "format=duration"]):
+        p = subprocess.run([probe, "-v", "error"] + entries + ["-of", "csv=p=0", source],
+                           capture_output=True, text=True)
+        try:
+            return float(p.stdout.strip().splitlines()[0])
+        except (ValueError, IndexError):
+            continue
+    raise BdmvError(f"cannot tell how long {source} is")
+
+
+def _has_audio(source, ffmpeg, stream=0):
+    probe = shutil.which("ffprobe") or ffmpeg.replace("ffmpeg", "ffprobe")
+    p = subprocess.run([probe, "-v", "error", "-select_streams", f"a:{stream}", "-show_entries",
                         "stream=index", "-of", "csv=p=0", source], capture_output=True, text=True)
     return bool(p.stdout.strip())
 

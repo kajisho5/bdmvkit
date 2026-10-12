@@ -58,6 +58,23 @@ disc.add_title("extras.m2ts", fps=(25, 1))
 disc.write("out")                       # out/BDMV/...
 ```
 
+A clip can carry several sound tracks, each from the video itself or from
+another file; track k is the title's audio track k (silence when a file has
+no sound, and sound shorter than the picture is made up with silence):
+
+```python
+from bdmvkit.encode import AudioTrack
+
+encode_clip("feature.mov", "feature.m2ts", audio=[
+    AudioTrack(),                                   # the video's own sound, AC-3
+    AudioTrack("commentary.wav", "lpcm"),           # another file, LPCM
+    AudioTrack("feature.mov", "ac3", 6, stream=1),  # its second sound stream, 5.1
+])
+disc.add_title("feature.m2ts", audio=[("ac3", 2, "en"), ("lpcm", 2, "en"), ("ac3", 6, "ja")])
+```
+
+`Disc.write` checks that every track a title declares is in its clip.
+
 A menu is a picture and its buttons. Each button is a picture of how it
 looks when selected (and, if given, when activated and before it is
 selected), placed on the 1920 x 1080 menu, and a link:

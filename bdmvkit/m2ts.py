@@ -4,7 +4,7 @@ and the span of its pictures, for the clip information and chapter marks."""
 import dataclasses
 
 from .errors import BdmvError
-from .formats import VIDEO_PID
+from .formats import PMT_PID, VIDEO_PID
 
 
 @dataclasses.dataclass
@@ -76,3 +76,27 @@ def scan_m2ts(path, video_pid=VIDEO_PID):
     step = ordered[1] - ordered[0] if len(ordered) > 1 else 3003
     return ClipScan(spn, ordered[0], ordered[-1] + step, pcr_pid or video_pid,
                     [tuple(e) for e in entries])
+
+
+def stream_pids(path, pmt_pid=PMT_PID):
+    """{PID: stream type} of the elementary streams the clip's first program
+    map table names."""
+    with open(path, "rb") as f:
+        while (pkt := f.read(192)):
+            if len(pkt) < 192:
+                break
+            p = 4
+            if (pkt[p + 1] & 0x1F) << 8 | pkt[p + 2] != pmt_pid or not pkt[p + 1] & 0x40:
+                continue
+            q = p + 4
+            if pkt[p + 3] & 0x20:
+                q += 1 + pkt[q]
+            q += 1 + pkt[q]                                # pointer field
+            end = q + 3 + ((pkt[q + 1] & 0x0F) << 8 | pkt[q + 2]) - 4
+            e = q + 12 + ((pkt[q + 10] & 0x0F) << 8 | pkt[q + 11])
+            pids = {}
+            while e < min(end, 192):
+                pids[(pkt[e + 1] & 0x1F) << 8 | pkt[e + 2]] = pkt[e]
+                e += 5 + ((pkt[e + 3] & 0x0F) << 8 | pkt[e + 4])
+            return pids
+    raise BdmvError(f"{path}: no program map table (PID {pmt_pid:#06x})")
