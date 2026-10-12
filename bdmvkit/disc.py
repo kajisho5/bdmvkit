@@ -74,14 +74,16 @@ class MenuButton:
 @dataclasses.dataclass
 class Menu:
     id: str
-    background: str              # picture file, fitted into the HD frame
+    background: str              # picture (or video) file, fitted into the HD frame
     buttons: list
     fps: tuple = (24000, 1001)
     default: str = None          # the button selected first (default: the first)
     loop: int = None             # held this many times its length, then `end`
     end: str = None
     prohibit: list = dataclasses.field(default_factory=list)
-    seconds: float = 1.0         # its clip's length
+    seconds: float = None        # its clip's length (default: 1, or the video's or music's)
+    music: str = None            # sound file played with it
+    loop_point: float = None     # where it plays again from (seconds), with motion or music
 
 
 def _check_streams(n, title):
@@ -150,19 +152,24 @@ class Disc:
         self.playlists.append(program.Playlist(playlist_id, out, order, end))
 
     def add_menu(self, menu_id, background, buttons, fps=(24000, 1001), default=None, loop=None,
-                 end=None, prohibit=(), seconds=1.0):
-        """Add a menu: `background` a picture, `buttons` MenuButtons. The
-        menu's clip (`seconds` long) is made when the disc is written
-        (ffmpeg). It holds its last picture; with `loop`, only for `loop`
-        times its length, then it does `end`."""
+                 end=None, prohibit=(), seconds=None, music=None, loop_point=None):
+        """Add a menu: `background` a picture or a video, `buttons`
+        MenuButtons, `music` a sound file. The menu's clip (`seconds` long:
+        by default 1, or as long as the video, else the music) is made when
+        the disc is written (ffmpeg). A still menu holds its last picture;
+        one with a video or music plays again, from `loop_point` (seconds)
+        the second time round. With `loop`, it does so `loop` times (a
+        still one holds its picture for its length each time), then `end`."""
         if tuple(fps) not in FORMATS:
             raise BdmvError(f"{fps[0]}/{fps[1]} fps has no Blu-ray format")
         if any(m.id == menu_id for m in self.menus):
             raise BdmvError(f"there is a menu {menu_id!r} already")
         if not buttons:
             raise BdmvError(f"menu {menu_id!r} needs at least one button")
+        if loop_point is not None and loop_point < 0:
+            raise BdmvError(f"menu {menu_id!r}: loop point {loop_point} before the start")
         self.menus.append(Menu(menu_id, background, list(buttons), tuple(fps), default, loop,
-                               end, list(prohibit), seconds))
+                               end, list(prohibit), seconds, music, loop_point))
 
     def add_popup(self, title, buttons, default=None):
         """Give title `title` (its number) a pop-up menu: `buttons`
@@ -177,9 +184,10 @@ class Disc:
             raise BdmvError(f"title {title}: a pop-up menu needs at least one button")
         self.popups[title] = (list(buttons), default)
 
-    def program(self, play_all=True):
+    def program(self, play_all=True, probe=False):
         """The disc as a program.Program (titles "1", "2" ...; menus with no
-        clip yet: write makes them)."""
+        clip yet: write makes them). With `probe`, menu backgrounds are read
+        to tell videos from pictures (else they count as pictures)."""
         n_titles = len(self.titles)
         titles = []
         for n, t in enumerate(self.titles, 1):
@@ -192,12 +200,15 @@ class Disc:
                  for k, lang in enumerate(t.subtitles, 1)], end, list(t.prohibit),
                 popup=n in self.popups,
                 popup_buttons=[_button(b) for b in self.popups.get(n, ((), None))[0]]))
-        menus = [program.Menu(m.id, None,
-                              [_button(b) for b in m.buttons],
-                              fps=m.fps, default=m.default, loop=m.loop, end=m.end,
-                              still_time=max(1, round(m.seconds)) if m.loop is not None
-                              else None,
-                              prohibit=list(m.prohibit)) for m in self.menus]
+        menus = []
+        for m in self.menus:
+            still = not (m.music or (probe and _motion(m)))
+            menus.append(program.Menu(
+                m.id, None, [_button(b) for b in m.buttons], fps=m.fps, default=m.default,
+                still=still,
+                still_time=max(1, round(_seconds(m))) if still and m.loop is not None else None,
+                loop_point=m.loop_point if not still else None, loop=m.loop, end=m.end,
+                music=bool(m.music), prohibit=list(m.prohibit)))
         first_menu = f"menu:{self.menus[0].id}" if self.menus else None
         return program.Program(titles, list(self.playlists), menus,
                                first_play=self.first_play or first_menu,
@@ -210,8 +221,8 @@ class Disc:
         "chapters"}."""
         if not self.titles:
             raise BdmvError("a disc needs at least one title")
-        prog = self.program(play_all)
-        prog.check()                     # (the menus' clips are made below)
+        self.program(play_all).check()   # (before any file is read)
+        prog = self.program(play_all, probe=True)
         for n, t in enumerate(self.titles, 1):
             _check_streams(n, t)
         nav = Navigation(prog)
@@ -237,7 +248,9 @@ class Disc:
             with open(sup, "wb") as f:
                 f.write(igs.ig_stream(buttons, frame_rate, default=m.default,
                                       follow_selection=nav.follows_selection(m.id)))
-            encode.encode_menu(m.background, sup, pm.clip, m.fps, seconds=m.seconds, fast=fast)
+            encode.encode_menu(m.background, sup, pm.clip, m.fps, seconds=_seconds(m), fast=fast,
+                               motion=_motion(m), music=m.music,
+                               keys=[m.loop_point] if m.loop_point else [])
 
 
     def _add_popup(self, t, buttons, default, pt, nav):
@@ -250,6 +263,21 @@ class Disc:
             with open(sup, "wb") as f:
                 f.write(igs.ig_stream(ig, frame_rate, default=default, popup=True))
             encode.add_ig_stream(t.clip, sup, pt.clip)
+
+
+def _motion(m):
+    """Whether menu m's background is a video (asked once)."""
+    if not hasattr(m, "_motion"):
+        m._motion = encode.is_video(m.background)
+    return m._motion
+
+
+def _seconds(m):
+    if m.seconds is not None:
+        return m.seconds
+    if _motion(m):
+        return encode.media_seconds(m.background)
+    return encode.media_seconds(m.music) if m.music else 1.0
 
 
 def _button(b):

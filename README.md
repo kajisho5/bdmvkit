@@ -18,14 +18,14 @@ only to encode.
 
 日本語の説明は [README.ja.md](README.ja.md) にあります。
 
-**Status: 0.4.** Titles with chapters, sound and subtitle tracks;
+**Status: 0.5.** Titles with chapters, sound and subtitle tracks;
 playlists (in order, at random or shuffled) and play all; menus whose
 buttons start titles, chapters, playlists and other menus, switch sound and
 subtitle tracks, or open a menu on a chosen button; loop counts, end-action
 overrides, link transitions, remote keys a title turns off, and 720p. This
 navigation is the one [oncemore](https://github.com/kajisho5/oncemore)
-writes, byte for byte. 0.4 adds pop-up menus over a playing title. Menus
-with motion or music come next.
+writes, byte for byte. 0.4 adds pop-up menus over a playing title, 0.5
+menus with motion or music.
 
 ## Why
 
@@ -115,6 +115,15 @@ disc.add_menu("main", "menu.png", [
 ], loop=3, end="playall", seconds=10)
 ```
 
+A menu's background may be a video, and a menu may have music. Such a menu
+plays again when it ends, from `loop_point` (seconds) the second time
+round; it lasts as long as its video, else its music, unless `seconds`
+says:
+
+```python
+disc.add_menu("main", "loop.mp4", buttons, music="theme.wav", loop_point=2.0)
+```
+
 A title can have a pop-up menu: buttons over its picture, opened with the
 remote's Pop-up Menu key. Their pictures are placed on the 1920 x 1080 frame
 as a menu's are; a button that only switches the sound or subtitle track
@@ -192,6 +201,8 @@ The tests encode real clips, write a disc, and read it back with
   the titles, chapters, playlists and menus they link to, that a shuffled
   playlist plays each item once, and that a menu with a loop count goes on
   by itself;
+* that a menu with a video and music plays again from its loop point, and
+  that one with a loop count goes on by itself after playing that often;
 * that a pop-up menu opens over a playing title with the Pop-up Menu key and
   its buttons start another title or a chapter;
 * the commands every kind of action, title, playlist and menu turns into.

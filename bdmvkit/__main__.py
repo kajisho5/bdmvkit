@@ -10,7 +10,8 @@ DISC.json: {"titles": [{"clip": "a.m2ts", "fps": "24000/1001",
 "action": "title:1"}]}], "play_all": true}; paths are relative to the JSON
 file. A button may also have "activated" and "normal" pictures, "nav"
 ({"up": id, ...}), "auto", "audio", "subtitle" and "override"; a menu
-"default" (a button id), "fps", "loop", "end", "seconds" and "prohibit"; a
+"default" (a button id), "fps", "loop", "end", "seconds", "prohibit",
+"music" (a sound file) and "loop_point" (its "background" may be a video); a
 title "default_audio", "default_subtitle", "prohibit" and "popup" ({"buttons":
 [...], "default"}: its pop-up menu, buttons as a menu's). The disc may have
 "playlists" ([{"id", "items": [n or [n, first, last]], "order", "end"}]),
@@ -89,7 +90,8 @@ def main(argv=None):
             disc.add_menu(m["id"], file(m["background"]), buttons(m["buttons"]),
                           fps=_fps(m.get("fps", "24000/1001")), default=m.get("default"),
                           loop=m.get("loop"), end=m.get("end"), prohibit=m.get("prohibit", []),
-                          seconds=float(m.get("seconds", 1.0)))
+                          seconds=m.get("seconds"), music=file(m.get("music")),
+                          loop_point=m.get("loop_point"))
         res = disc.write(args.out, play_all=spec.get("play_all", True), fast=args.fast)
     except (BdmvError, OSError, KeyError, ValueError) as e:
         print(f"bdmvkit: {getattr(e, 'message', e)}", file=sys.stderr)

@@ -185,22 +185,37 @@ def picture(path, size=None, ffmpeg=None):
     return w, h, p.stdout
 
 
-def encode_menu(background, sup, out, fps=(24000, 1001), seconds=1.0, fast=False, ffmpeg=None):
-    """A menu clip: the picture `background` (fitted into the HD frame) for
-    `seconds`, with the IG stream `sup` (igs.ig_stream) as its buttons; the
-    playlist holds its last picture."""
+def encode_menu(background, sup, out, fps=(24000, 1001), seconds=1.0, fast=False, ffmpeg=None,
+                motion=False, music=None, keys=()):
+    """A menu clip `seconds` long: the picture `background` (fitted into the
+    HD frame; with `motion`, a video played from its start), with the IG
+    stream `sup` (igs.ig_stream) as its buttons and, with `music`, that
+    sound file as its sound track (AC-3, padded with silence to the
+    length). A still menu's playlist holds its last picture; one with
+    motion or music plays again. `keys`: times (s) that become key frames
+    (the loop point, so its mark lands on it)."""
     ffmpeg = ffmpeg or shutil.which("ffmpeg")
     if not ffmpeg:
         raise BdmvError("encoding needs ffmpeg (with libx264)")
     from .igs import patch_ig_stream_type
     num, den = fps
-    cmd = [ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-y",
-           "-loop", "1", "-framerate", f"{num}/{den}", "-t", f"{seconds:.3f}", "-i", background,
-           "-f", "sup", "-i", sup,
-           "-filter_complex", f"[0:v]{fit_filter(fps)},format=yuv420p[v]",
-           "-map", "[v]", "-map", "1:0"] + video_args(fps, MAX_VIDEO_BPS, fast) + \
-        ["-c:s", "copy", "-streamid", f"0:{VIDEO_PID}", "-streamid", f"1:{IG_PID}",
-         "-t", f"{seconds:.3f}", "-f", "mpegts", "-mpegts_m2ts_mode", "1",
+    picture = ["-i", background] if motion else \
+        ["-loop", "1", "-framerate", f"{num}/{den}", "-t", f"{seconds:.3f}", "-i", background]
+    cmd = [ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-y"] + picture + \
+        ["-f", "sup", "-i", sup] + (["-i", music] if music else [])
+    graph = f"[0:v]{fit_filter(fps)},format=yuv420p[v]"
+    maps = ["-map", "[v]", "-map", "1:0"]
+    ids = ["-streamid", f"0:{VIDEO_PID}", "-streamid", f"1:{IG_PID}"]
+    sound = []
+    if music:
+        graph += ";[2:a:0]apad[a]"
+        maps += ["-map", "[a]"]
+        ids += ["-streamid", f"2:{AUDIO_PID}"]
+        sound = audio_args("ac3", 2)
+    keys = [t for t in keys if t and t > 0]
+    cmd += ["-filter_complex", graph] + maps + video_args(fps, MAX_VIDEO_BPS, fast, keys) + \
+        sound + ["-c:s", "copy"] + ids + \
+        ["-t", f"{seconds:.3f}", "-f", "mpegts", "-mpegts_m2ts_mode", "1",
          "-mpegts_pmt_start_pid", str(PMT_PID), out]
     p = subprocess.run(cmd, capture_output=True, text=True)
     if p.returncode != 0:
@@ -208,6 +223,30 @@ def encode_menu(background, sup, out, fps=(24000, 1001), seconds=1.0, fast=False
                         f"{p.stderr.strip()[-800:]}")
     patch_ig_stream_type(out)
     return out
+
+
+def is_video(path, ffmpeg=None):
+    """Whether `path` is a video (moving pictures) rather than a picture."""
+    ffmpeg = ffmpeg or shutil.which("ffmpeg") or "ffmpeg"
+    probe = shutil.which("ffprobe") or ffmpeg.replace("ffmpeg", "ffprobe")
+    p = subprocess.run([probe, "-v", "error", "-show_entries", "format=format_name", "-of",
+                        "csv=p=0", path], capture_output=True, text=True)
+    name = p.stdout.strip()
+    if not name:
+        raise BdmvError(f"cannot read {path}")
+    return not (name == "image2" or name.endswith("_pipe"))
+
+
+def media_seconds(path, ffmpeg=None):
+    """How long a video or sound file lasts (seconds)."""
+    ffmpeg = ffmpeg or shutil.which("ffmpeg") or "ffmpeg"
+    probe = shutil.which("ffprobe") or ffmpeg.replace("ffmpeg", "ffprobe")
+    p = subprocess.run([probe, "-v", "error", "-show_entries", "format=duration", "-of",
+                        "csv=p=0", path], capture_output=True, text=True)
+    try:
+        return float(p.stdout.strip())
+    except ValueError:
+        raise BdmvError(f"cannot tell how long {path} is")
 
 
 def add_ig_stream(clip, sup, out, ffmpeg=None):
