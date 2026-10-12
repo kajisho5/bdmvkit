@@ -32,19 +32,13 @@ With menus, first play and the Top Menu key open the first menu.
 
 import dataclasses
 import os
-import shutil
-
 import tempfile
 
-from . import clip as clip_info
-from . import encode, hdmv, igs, playlist
+from . import encode, igs, program
 from .errors import BdmvError
 from .formats import AUDIO_PID, CODECS, FORMATS, HEIGHT, PG_PID, WIDTH, lang3
-from .m2ts import scan_m2ts, stream_pids
-
-DIRS = ["BDMV/PLAYLIST", "BDMV/CLIPINF", "BDMV/STREAM", "BDMV/AUXDATA", "BDMV/BDJO",
-        "BDMV/JAR", "BDMV/META", "BDMV/BACKUP/PLAYLIST", "BDMV/BACKUP/CLIPINF",
-        "BDMV/BACKUP/BDJO", "CERTIFICATE/BACKUP"]
+from .m2ts import stream_pids
+from .nav import DIRS, Navigation, _write, chapter_marks, write_program  # noqa: F401
 
 
 @dataclasses.dataclass
@@ -54,7 +48,10 @@ class Title:
     chapters: list = dataclasses.field(default_factory=lambda: [0.0])   # starts, seconds
     audio: list = dataclasses.field(default_factory=lambda: [("ac3", 2, "und")])
     subtitles: list = dataclasses.field(default_factory=list)          # PG tracks: languages
-    end: str = None              # after it: "title:<n>", "menu:<id>" (None: the next with play_all)
+    end: str = None              # the action after it (None: the next title with play_all)
+    default_audio: int = None    # the sound track the disc starts with (1-based)
+    default_subtitle: int = None  # the subtitle track shown when it starts (None: off)
+    prohibit: list = dataclasses.field(default_factory=list)           # uops.KEYS names
 
 
 @dataclasses.dataclass
@@ -65,9 +62,12 @@ class MenuButton:
     selected: str                # picture files (PNG ...): selected,
     activated: str = None        # activated (default: the selected one),
     normal: str = None           # and before it is selected (default: nothing)
-    action: str = None           # "title:<n>", "chapter:<n>:<c>", "menu:<id>"
+    action: str = None           # where it goes: an action (program.py), e.g. "title:2"
     nav: dict = dataclasses.field(default_factory=dict)    # direction -> button id
     auto: bool = False           # runs as soon as it is selected
+    audio: int = None            # switch to this sound track (1-based) first
+    subtitle: int = None         # ... and to this subtitle track (0: off)
+    override: str = None         # the end action of the title it starts, instead of its own
 
 
 @dataclasses.dataclass
@@ -77,19 +77,10 @@ class Menu:
     buttons: list
     fps: tuple = (24000, 1001)
     default: str = None          # the button selected first (default: the first)
-
-
-def chapter_marks(chapters, scan):
-    """Chapter marks (45 kHz): each chapter on the key frame nearest to it,
-    the first at the start of the clip."""
-    marks = [scan.first_pts // 2]
-    keys = [pts for pts, _, _ in scan.entries]
-    for t in sorted(c for c in chapters if c > 0):
-        want = scan.first_pts + round(t * 90000)
-        near = min(keys, key=lambda k: abs(k - want))
-        if near // 2 > marks[-1]:
-            marks.append(near // 2)
-    return marks
+    loop: int = None             # held this many times its length, then `end`
+    end: str = None
+    prohibit: list = dataclasses.field(default_factory=list)
+    seconds: float = 1.0         # its clip's length
 
 
 def _check_streams(n, title):
@@ -104,23 +95,27 @@ def _check_streams(n, title):
                             f"(no stream with PID {first + k:#06x})")
 
 
-def _write(out_dir, rel, data):
-    for base in ("BDMV", os.path.join("BDMV", "BACKUP")):
-        with open(os.path.join(out_dir, base, rel), "wb") as f:
-            f.write(data)
-
-
 class Disc:
-    def __init__(self):
+    """first_play: the action the disc starts with (default: the first menu,
+    or title 1); title_key: the Top Menu key's (default: the same)."""
+
+    def __init__(self, first_play=None, title_key=None):
         self.titles = []
         self.menus = []
+        self.playlists = []
+        self.first_play = first_play
+        self.title_key = title_key
 
     def add_title(self, clip, fps=(24000, 1001), chapters=(0.0,), audio=(("ac3", 2, "und"),),
-                  subtitles=(), end=None):
-        """Add a title; returns its number (1-based). audio: (codec, channels,
-        language) per track, codec "ac3", "lpcm" or "dts"; languages are ISO
-        639-1 ("en") or 639-2 ("eng") codes. end: where it goes when it ends,
-        "title:<n>" or "menu:<id>" (default: the next title with play_all)."""
+                  subtitles=(), end=None, default_audio=None, default_subtitle=None,
+                  prohibit=()):
+        """Add a title; returns its number (1-based), its id in actions
+        ("title:2"). audio: (codec, channels, language) per track, codec
+        "ac3", "lpcm" or "dts"; languages are ISO 639-1 ("en") or 639-2
+        ("eng") codes. end: the action when it ends (default: the next title
+        with play_all). default_audio: the sound track the disc starts with;
+        default_subtitle: the subtitle track shown from its start (else
+        none); prohibit: remote keys it does not allow (uops.KEYS)."""
         if tuple(fps) not in FORMATS:
             raise BdmvError(f"{fps[0]}/{fps[1]} fps has no Blu-ray format")
         for codec, _, _ in audio:
@@ -128,47 +123,69 @@ class Disc:
                 raise BdmvError(f"unknown audio codec {codec!r} (ac3, lpcm or dts)")
         if not audio:
             raise BdmvError("a title needs at least one audio track")
+        for name, k, n in (("default_audio", default_audio, len(audio)),
+                           ("default_subtitle", default_subtitle, len(subtitles))):
+            if k is not None and not 1 <= k <= n:
+                raise BdmvError(f"{name} {k}: the title has {n} such tracks")
         self.titles.append(Title(clip, tuple(fps), list(chapters) or [0.0], list(audio),
-                                 list(subtitles), end))
+                                 list(subtitles), end, default_audio, default_subtitle,
+                                 list(prohibit)))
         return len(self.titles)
 
-    def add_menu(self, menu_id, background, buttons, fps=(24000, 1001), default=None):
+    def add_playlist(self, playlist_id, items, order="sequential", end=None):
+        """Add a playlist: items (title, first chapter, last chapter), or
+        title numbers for whole titles, played one after another
+        ("sequential"), picked at random as many times as there are items
+        ("random"), or each once in a random order ("shuffle"). It is
+        started by "playlist:<id>"."""
+        if any(p.id == playlist_id for p in self.playlists):
+            raise BdmvError(f"there is a playlist {playlist_id!r} already")
+        out = []
+        for it in items:
+            n, first, last = (it, 1, None) if isinstance(it, int) else tuple(it) + (None,) * \
+                (3 - len(it))
+            out.append(program.PlaylistItem(str(n), first or 1, last))
+        self.playlists.append(program.Playlist(playlist_id, out, order, end))
+
+    def add_menu(self, menu_id, background, buttons, fps=(24000, 1001), default=None, loop=None,
+                 end=None, prohibit=(), seconds=1.0):
         """Add a menu: `background` a picture, `buttons` MenuButtons. The
-        menu's clip is made when the disc is written (ffmpeg)."""
+        menu's clip (`seconds` long) is made when the disc is written
+        (ffmpeg). It holds its last picture; with `loop`, only for `loop`
+        times its length, then it does `end`."""
         if tuple(fps) not in FORMATS:
             raise BdmvError(f"{fps[0]}/{fps[1]} fps has no Blu-ray format")
         if any(m.id == menu_id for m in self.menus):
             raise BdmvError(f"there is a menu {menu_id!r} already")
         if not buttons:
             raise BdmvError(f"menu {menu_id!r} needs at least one button")
-        self.menus.append(Menu(menu_id, background, list(buttons), tuple(fps), default))
+        self.menus.append(Menu(menu_id, background, list(buttons), tuple(fps), default, loop,
+                               end, list(prohibit), seconds))
 
-    def _links(self):
-        """{action: commands} for every link the titles and buttons use, and
-        the chapter objects [(title, chapter)] they need."""
+    def program(self, play_all=True):
+        """The disc as a program.Program (titles "1", "2" ...; menus with no
+        clip yet: write makes them)."""
         n_titles = len(self.titles)
-        menu_title = {m.id: n_titles + k for k, m in enumerate(self.menus, 1)}
-        actions = [t.end for t in self.titles if t.end] + \
-            [b.action for m in self.menus for b in m.buttons if b.action]
-        links, chapter_objects = {}, []
-        for a in actions:
-            kind, _, rest = a.partition(":")
-            if kind == "title" and rest.isdigit() and 1 <= int(rest) <= n_titles:
-                links[a] = [hdmv.jump_title(int(rest))]
-            elif kind == "menu" and rest in menu_title:
-                links[a] = [hdmv.jump_title(menu_title[rest])]
-            elif kind == "chapter":
-                n, _, c = rest.partition(":")
-                if not (n.isdigit() and c.isdigit() and 1 <= int(n) <= n_titles):
-                    raise BdmvError(f"{a!r}: no such title")
-                key = (int(n), int(c))
-                if key not in chapter_objects:
-                    chapter_objects.append(key)
-                links[a] = key                  # (its object's number: once known)
-            else:
-                raise BdmvError(f"{a!r}: not title:<n>, chapter:<n>:<c> or menu:<id> "
-                                "of this disc")
-        return links, chapter_objects, menu_title
+        titles = []
+        for n, t in enumerate(self.titles, 1):
+            end = t.end or (f"title:{n + 1}" if play_all and n < n_titles else None)
+            titles.append(program.Title(
+                str(n), t.clip, t.fps, list(t.chapters),
+                [program.Audio(CODECS[c], ch, _lang(lang), k == t.default_audio)
+                 for k, (c, ch, lang) in enumerate(t.audio, 1)],
+                [program.Subtitle(_lang(lang), k == t.default_subtitle)
+                 for k, lang in enumerate(t.subtitles, 1)], end, list(t.prohibit)))
+        menus = [program.Menu(m.id, None,
+                              [program.Button(b.id, b.action, b.audio, b.subtitle,
+                                              override=b.override) for b in m.buttons],
+                              fps=m.fps, default=m.default, loop=m.loop, end=m.end,
+                              still_time=max(1, round(m.seconds)) if m.loop is not None
+                              else None,
+                              prohibit=list(m.prohibit)) for m in self.menus]
+        first_menu = f"menu:{self.menus[0].id}" if self.menus else None
+        return program.Program(titles, list(self.playlists), menus,
+                               first_play=self.first_play or first_menu,
+                               title_key=self.title_key)
 
     def write(self, out_dir, move=False, play_all=True, fast=False):
         """Write the BDMV folder into `out_dir` (copying the clips into
@@ -177,69 +194,24 @@ class Disc:
         "chapters"}."""
         if not self.titles:
             raise BdmvError("a disc needs at least one title")
-        links, chapter_objects, menu_title = self._links()
-        n_titles = len(self.titles)
-        # movie objects: one per title, one per menu, first play, top menu,
-        # then one per chapter a link starts
-        first_chapter_object = n_titles + len(self.menus) + 2
-        for a, v in links.items():
-            if isinstance(v, tuple):
-                links[a] = [hdmv.jump_object(first_chapter_object + chapter_objects.index(v))]
-        for d in DIRS:
-            os.makedirs(os.path.join(out_dir, d), exist_ok=True)
-        objects, chapters = [], []
+        prog = self.program(play_all)
+        prog.check()                     # (the menus' clips are made below)
         for n, t in enumerate(self.titles, 1):
-            name = f"{n:05d}"
-            scan = scan_m2ts(t.clip)
             _check_streams(n, t)
-            video_format, frame_rate = FORMATS[t.fps]
-            audio = [(CODECS[c], ch, _lang(lang)) for c, ch, lang in t.audio]
-            pg = [_lang(lang) for lang in t.subtitles]
-            marks = chapter_marks(t.chapters, scan)
-            chapters.append(len(marks))
-            _write(out_dir, os.path.join("CLIPINF", f"{name}.clpi"),
-                   clip_info.clpi(scan, video_format, frame_rate, audio, pg))
-            item = (name, marks[0], scan.end_pts // 2, video_format, frame_rate, audio, pg,
-                    False, 0)
-            _write(out_dir, os.path.join("PLAYLIST", f"{name}.mpls"),
-                   playlist.mpls([item], [(0, m) for m in marks]))
-            dest = os.path.join(out_dir, "BDMV", "STREAM", f"{name}.m2ts")
-            if os.path.abspath(t.clip) != os.path.abspath(dest):
-                (shutil.move if move else shutil.copyfile)(t.clip, dest)
-            objects.append([hdmv.play_pl(n)] + self._end(t, n, play_all, links))
-        for k, m in enumerate(self.menus, n_titles + 1):
-            self._write_menu(out_dir, k, m, links, fast)
-            objects.append([hdmv.play_pl(k)])     # (its last picture held: a still)
-        # first play and the Top Menu key: the first menu, or title 1
-        objects.append([hdmv.jump_title(n_titles + 1 if self.menus else 1)])
-        start = len(objects) - 1
-        objects.append([hdmv.jump_title(n_titles + 1 if self.menus else 1)])
-        for n, c in chapter_objects:
-            t = self.titles[n - 1]
-            if c > chapters[n - 1]:
-                raise BdmvError(f"chapter:{n}:{c}: title {n} has {chapters[n - 1]} chapters")
-            objects.append([hdmv.play_pl_mark(n, c - 1)] + self._end(t, n, play_all, links))
-        first = FORMATS[self.titles[0].fps]
-        total = n_titles + len(self.menus)
-        _write(out_dir, "index.bdmv", hdmv.index_bdmv(
-            list(range(total)), start, start + 1, *first,
-            interactive=range(n_titles + 1, total + 1)))
-        _write(out_dir, "MovieObject.bdmv", hdmv.movie_objects(objects))
-        return {"titles": n_titles, "menus": len(self.menus),
-                "playlists": [f"{n:05d}.mpls" for n in range(1, total + 1)],
-                "chapters": chapters}
+        nav = Navigation(prog)
+        os.makedirs(os.path.join(out_dir, "BDMV", "STREAM"), exist_ok=True)
+        for k, (m, pm) in enumerate(zip(self.menus, prog.menus), len(self.titles) + 1):
+            pm.clip = os.path.join(out_dir, "BDMV", "STREAM", f"{k:05d}.m2ts")
+            self._encode_menu(m, pm, nav, fast)
+        out = write_program(prog, out_dir, move=move)
+        return {"titles": len(self.titles), "menus": len(self.menus),
+                "playlists": out["playlists"], "chapters": out["chapters"]}
 
-    def _end(self, t, n, play_all, links):
-        if t.end:
-            return list(links[t.end])
-        return [hdmv.jump_title(n + 1)] if play_all and n < len(self.titles) else []
-
-    def _write_menu(self, out_dir, k, m, links, fast):
-        """Menu `m` as title / playlist / clip k: its buttons' pictures read,
-        the IG stream made and encoded with its picture into the clip."""
-        name = f"{k:05d}"
+    def _encode_menu(self, m, pm, nav, fast):
+        """Menu `m`'s clip (pm.clip): its buttons' pictures read, the IG
+        stream made with their commands and encoded with its picture."""
         buttons = []
-        for b in m.buttons:
+        for b, pb in zip(m.buttons, pm.buttons):
             w, h, sel = encode.picture(b.selected)
             if b.x < 0 or b.y < 0 or b.x + w > WIDTH or b.y + h > HEIGHT:
                 raise BdmvError(f"menu {m.id!r}: button {b.id!r} ({w} x {h} at {b.x}, {b.y}) "
@@ -247,22 +219,14 @@ class Disc:
             act = encode.picture(b.activated, (w, h))[2] if b.activated else None
             nor = encode.picture(b.normal, (w, h))[2] if b.normal else None
             buttons.append(igs.Button(b.id, b.x, b.y, w, h, sel, act, nor,
-                                      list(links[b.action]) if b.action else [],
-                                      dict(b.nav), b.auto))
-        video_format, frame_rate = FORMATS[m.fps]
-        dest = os.path.join(out_dir, "BDMV", "STREAM", f"{name}.m2ts")
+                                      nav.button(pb) if b.action else [], dict(b.nav), b.auto))
+        _, frame_rate = FORMATS[m.fps]
         with tempfile.TemporaryDirectory(prefix="bdmvkit-") as work:
             sup = os.path.join(work, "menu.sup")
             with open(sup, "wb") as f:
-                f.write(igs.ig_stream(buttons, frame_rate, default=m.default))
-            encode.encode_menu(m.background, sup, dest, m.fps, fast=fast)
-        scan = scan_m2ts(dest)
-        _write(out_dir, os.path.join("CLIPINF", f"{name}.clpi"),
-               clip_info.clpi(scan, video_format, frame_rate, [], [], ig=True))
-        item = (name, scan.first_pts // 2, scan.end_pts // 2, video_format, frame_rate, [], [],
-                True, 2)
-        _write(out_dir, os.path.join("PLAYLIST", f"{name}.mpls"),
-               playlist.mpls([item], [(0, scan.first_pts // 2)]))
+                f.write(igs.ig_stream(buttons, frame_rate, default=m.default,
+                                      follow_selection=nav.follows_selection(m.id)))
+            encode.encode_menu(m.background, sup, pm.clip, m.fps, seconds=m.seconds, fast=fast)
 
 
 def _lang(code):

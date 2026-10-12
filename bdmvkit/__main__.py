@@ -9,7 +9,11 @@ DISC.json: {"titles": [{"clip": "a.m2ts", "fps": "24000/1001",
 "buttons": [{"id": "play", "x": 160, "y": 700, "selected": "play.png",
 "action": "title:1"}]}], "play_all": true}; paths are relative to the JSON
 file. A button may also have "activated" and "normal" pictures, "nav"
-({"up": id, ...}) and "auto"; a menu "default" (a button id) and "fps".
+({"up": id, ...}), "auto", "audio", "subtitle" and "override"; a menu
+"default" (a button id), "fps", "loop", "end", "seconds" and "prohibit"; a
+title "default_audio", "default_subtitle" and "prohibit". The disc may have
+"playlists" ([{"id", "items": [n or [n, first, last]], "order", "end"}]),
+"first_play" and "title_key".
 """
 
 import argparse
@@ -56,12 +60,17 @@ def main(argv=None):
         with open(args.disc, encoding="utf-8") as f:
             spec = json.load(f)
         base = os.path.dirname(os.path.abspath(args.disc))
-        disc = Disc()
+        disc = Disc(spec.get("first_play"), spec.get("title_key"))
         for t in spec.get("titles", []):
             disc.add_title(os.path.join(base, t["clip"]), fps=_fps(t.get("fps", "24000/1001")),
                            chapters=t.get("chapters", [0]),
                            audio=[tuple(a) for a in t.get("audio", [["ac3", 2, "und"]])],
-                           subtitles=t.get("subtitles", []), end=t.get("end"))
+                           subtitles=t.get("subtitles", []), end=t.get("end"),
+                           default_audio=t.get("default_audio"),
+                           default_subtitle=t.get("default_subtitle"),
+                           prohibit=t.get("prohibit", []))
+        for p in spec.get("playlists", []):
+            disc.add_playlist(p["id"], p["items"], p.get("order", "sequential"), p.get("end"))
 
         def file(name):
             return os.path.join(base, name) if name else None
@@ -70,9 +79,11 @@ def main(argv=None):
             disc.add_menu(m["id"], file(m["background"]), [
                 MenuButton(b["id"], int(b["x"]), int(b["y"]), file(b["selected"]),
                            file(b.get("activated")), file(b.get("normal")), b.get("action"),
-                           dict(b.get("nav", {})), bool(b.get("auto")))
+                           dict(b.get("nav", {})), bool(b.get("auto")), b.get("audio"),
+                           b.get("subtitle"), b.get("override"))
                 for b in m["buttons"]], fps=_fps(m.get("fps", "24000/1001")),
-                default=m.get("default"))
+                default=m.get("default"), loop=m.get("loop"), end=m.get("end"),
+                prohibit=m.get("prohibit", []), seconds=float(m.get("seconds", 1.0)))
         res = disc.write(args.out, play_all=spec.get("play_all", True), fast=args.fast)
     except (BdmvError, OSError, KeyError, ValueError) as e:
         print(f"bdmvkit: {getattr(e, 'message', e)}", file=sys.stderr)
