@@ -18,14 +18,14 @@ only to encode.
 
 日本語の説明は [README.ja.md](README.ja.md) にあります。
 
-**Status: 0.3.** Titles with chapters, sound and subtitle tracks;
+**Status: 0.4.** Titles with chapters, sound and subtitle tracks;
 playlists (in order, at random or shuffled) and play all; menus whose
 buttons start titles, chapters, playlists and other menus, switch sound and
 subtitle tracks, or open a menu on a chosen button; loop counts, end-action
 overrides, link transitions, remote keys a title turns off, and 720p. This
 navigation is the one [oncemore](https://github.com/kajisho5/oncemore)
-writes, byte for byte. Encoding pop-up menus and menus with motion or music
-comes next.
+writes, byte for byte. 0.4 adds pop-up menus over a playing title. Menus
+with motion or music come next.
 
 ## Why
 
@@ -115,6 +115,19 @@ disc.add_menu("main", "menu.png", [
 ], loop=3, end="playall", seconds=10)
 ```
 
+A title can have a pop-up menu: buttons over its picture, opened with the
+remote's Pop-up Menu key. Their pictures are placed on the 1920 x 1080 frame
+as a menu's are; a button that only switches the sound or subtitle track
+closes the menu.
+
+```python
+disc.add_popup(a, [
+    MenuButton("scenes", 160, 900, "scenes.png", "scenes-on.png", "scenes-off.png",
+               action="menu:main"),
+    MenuButton("ja", 560, 900, "ja.png", normal="ja-off.png", action="audio:2"),
+])
+```
+
 Underneath, `bdmvkit.program` describes a disc made of encoded clips
 (titles, playlists, menu clips that carry their buttons, transitions) and
 `bdmvkit.nav.write_program` writes it; `nav.Navigation` gives the commands a
@@ -179,6 +192,8 @@ The tests encode real clips, write a disc, and read it back with
   the titles, chapters, playlists and menus they link to, that a shuffled
   playlist plays each item once, and that a menu with a loop count goes on
   by itself;
+* that a pop-up menu opens over a playing title with the Pop-up Menu key and
+  its buttons start another title or a chapter;
 * the commands every kind of action, title, playlist and menu turns into.
 
 The files' fixed bytes are checked as well.

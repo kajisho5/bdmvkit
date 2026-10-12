@@ -121,7 +121,7 @@ class Navigation:
         # own default subtitles over the chosen ones (_start)
         self.stream_links = any(
             (b.audio or b.subtitle is not None) and b.action and parse_action(b.action)[0] in PLAYS
-            for m in p.menus for b in m.buttons)
+            for b in p.buttons())
 
     def menu_number(self, menu_id):
         return self.numbers.get(f"menu:{menu_id}")

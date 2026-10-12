@@ -9,6 +9,7 @@ interlaced (1080i) stream, as the format has no 1080p at those rates.
 """
 
 import dataclasses
+import os
 import shutil
 import subprocess
 
@@ -207,3 +208,49 @@ def encode_menu(background, sup, out, fps=(24000, 1001), seconds=1.0, fast=False
                         f"{p.stderr.strip()[-800:]}")
     patch_ig_stream_type(out)
     return out
+
+
+def add_ig_stream(clip, sup, out, ffmpeg=None):
+    """`clip` with the IG stream `sup` (igs.ig_stream, a pop-up menu) muxed
+    in, as `out`: the clip's streams copied with their PIDs and their times,
+    the buttons with IG_PID at the clip's first picture, marked Interactive
+    Graphics in the PMT. (Segments before the first picture are before the
+    play item's start, and players leave them out: so the buttons are timed
+    at it, not at the clip's own start, which the sound may begin.)"""
+    ffmpeg = ffmpeg or shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise BdmvError("muxing needs ffmpeg")
+    from .igs import patch_ig_stream_type
+    probe = shutil.which("ffprobe") or ffmpeg.replace("ffmpeg", "ffprobe")
+    p = subprocess.run([probe, "-v", "error", "-show_entries", "stream=index,id", "-of",
+                        "csv=p=0", clip], capture_output=True, text=True)
+    # (ffprobe lists a stream again under its program: one each, by index)
+    streams = dict(line.split(",")[:2] for line in p.stdout.split() if "," in line)
+    pids = [int(streams[k], 16) for k in sorted(streams, key=int)]
+    if not pids:
+        raise BdmvError(f"cannot read the streams of {clip}")
+    from .m2ts import scan_m2ts
+    start = scan_m2ts(clip).first_pts
+    with open(sup, "rb") as f:
+        data = bytearray(f.read())
+    i = 0
+    while i + 13 <= len(data):                   # each segment's PTS and DTS: the start
+        data[i + 2:i + 10] = (start & 0xFFFFFFFF).to_bytes(4, "big") * 2
+        i += 13 + int.from_bytes(data[i + 11:i + 13], "big")
+    timed = out + ".sup"
+    with open(timed, "wb") as f:
+        f.write(data)
+    cmd = [ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-y", "-copyts", "-i", clip,
+           "-f", "sup", "-i", timed, "-map", "0", "-map", "1:0", "-c", "copy"]
+    for k, pid in enumerate(pids + [IG_PID]):
+        cmd += ["-streamid", f"{k}:{pid}"]
+    cmd += ["-f", "mpegts", "-mpegts_m2ts_mode", "1", "-mpegts_pmt_start_pid", str(PMT_PID),
+            out]
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    os.remove(timed)
+    if p.returncode != 0:
+        raise BdmvError(f"ffmpeg could not add the pop-up menu to {clip}: "
+                        f"{p.stderr.strip()[-800:]}")
+    patch_ig_stream_type(out)
+    return out
+
