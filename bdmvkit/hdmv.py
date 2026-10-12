@@ -103,6 +103,11 @@ def add(reg, value):
     return _cmd(0x50, 0x40, reg, value, 0x03)
 
 
+def rnd(reg, top):
+    """Set general register <reg> to a random number from 1 to <top>."""
+    return _cmd(0x50, 0x40, reg, top, 0x08)
+
+
 def if_at_least(reg, value):
     """Compare: the next command runs only if general register `reg` >= value."""
     return _cmd(0x48, 0x40, reg, value, b2=0x04)
