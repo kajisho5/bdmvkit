@@ -57,6 +57,15 @@ class TestStream(unittest.TestCase):
         page = ics.index(bytes(8) + bytes(4)) + 12               # after the page's UO mask, effects
         self.assertEqual(struct.unpack(">H", ics[page + 1:page + 3])[0], 1)
 
+    def test_720p(self):
+        data = igs.ig_stream([button("a", 1100, 600)], frame_rate=1, size=(1280, 720))
+        ics = segments(data)[0][1]
+        self.assertEqual(struct.unpack(">HH", ics[:4]), (1280, 720))
+        # placed on the 720p frame: past its edge is refused
+        with self.assertRaises(BdmvError) as cm:
+            igs.ig_stream([button("a", 1200, 600)], 1, size=(1280, 720))
+        self.assertIn("1280 x 720", cm.exception.args[0])
+
     def test_auto_nav(self):
         nav = igs.auto_nav([button("a", 100, 100), button("b", 100, 300), button("c", 600, 300),
                             button("d", 100, 500, nav={"up": "c"})])
