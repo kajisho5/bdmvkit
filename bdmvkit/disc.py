@@ -36,7 +36,7 @@ import tempfile
 
 from . import encode, hdmv, igs, program
 from .errors import BdmvError
-from .formats import AUDIO_PID, CODECS, FORMATS, HEIGHT, PG_PID, WIDTH, lang3
+from .formats import AUDIO_PID, CODECS, FORMATS, HEIGHT, PG_PID, WIDTH, lang3, rate_code
 from .m2ts import stream_pids
 from .program import parse_action
 from .nav import DIRS, Navigation, _write, chapter_marks, write_program  # noqa: F401
@@ -114,17 +114,21 @@ class Disc:
                   subtitles=(), end=None, default_audio=None, default_subtitle=None,
                   prohibit=()):
         """Add a title; returns its number (1-based), its id in actions
-        ("title:2"). audio: (codec, channels, language) per track, codec
-        "ac3", "lpcm" or "dts"; languages are ISO 639-1 ("en") or 639-2
-        ("eng") codes. end: the action when it ends (default: the next title
+        ("title:2"). audio: (codec, channels, language[, rate]) per track,
+        codec "ac3", "lpcm", "dts", "dtshd" (DTS-HD High Resolution) or
+        "dtshd_ma" (DTS-HD Master Audio); languages are ISO 639-1 ("en") or
+        639-2 ("eng") codes; rate 48000 (the default), or 96000 or 192000
+        for LPCM and DTS-HD. end: the action when it ends (default: the next title
         with play_all). default_audio: the sound track the disc starts with;
         default_subtitle: the subtitle track shown from its start (else
         none); prohibit: remote keys it does not allow (uops.KEYS)."""
         if tuple(fps) not in FORMATS:
             raise BdmvError(f"{fps[0]}/{fps[1]} fps has no Blu-ray format")
-        for codec, _, _ in audio:
+        for codec, _, _, *rate in audio:
             if codec not in CODECS:
-                raise BdmvError(f"unknown audio codec {codec!r} (ac3, lpcm or dts)")
+                raise BdmvError(f"unknown audio codec {codec!r} "
+                                f"({', '.join(CODECS)})")
+            rate_code(CODECS[codec], *rate)
         if not audio:
             raise BdmvError("a title needs at least one audio track")
         for name, k, n in (("default_audio", default_audio, len(audio)),
@@ -194,8 +198,8 @@ class Disc:
             end = t.end or (f"title:{n + 1}" if play_all and n < n_titles else None)
             titles.append(program.Title(
                 str(n), t.clip, t.fps, list(t.chapters),
-                [program.Audio(CODECS[c], ch, _lang(lang), k == t.default_audio)
-                 for k, (c, ch, lang) in enumerate(t.audio, 1)],
+                [program.Audio(CODECS[c], ch, _lang(lang), k == t.default_audio, *rate)
+                 for k, (c, ch, lang, *rate) in enumerate(t.audio, 1)],
                 [program.Subtitle(_lang(lang), k == t.default_subtitle)
                  for k, lang in enumerate(t.subtitles, 1)], end, list(t.prohibit),
                 popup=n in self.popups,

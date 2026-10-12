@@ -1,6 +1,8 @@
 """Numbers of the BD-ROM format bdmvkit writes: stream PIDs, coding types,
 video format and frame rate codes, languages."""
 
+from .errors import BdmvError
+
 VERSION = b"0200"              # of the navigation files
 WIDTH, HEIGHT = 1920, 1080
 
@@ -49,7 +51,16 @@ def video_codes(fps, video="1080"):
 
 
 CODING_H264, CODING_LPCM, CODING_AC3, CODING_DTS = 0x1B, 0x80, 0x81, 0x82
+# DTS-HD High Resolution Audio and DTS-HD Master Audio: a DTS core with its
+# extensions (the stream types of libbluray's bluray.h)
+CODING_DTSHD, CODING_DTSHD_MA = 0x85, 0x86
 CODING_PG, CODING_IG = 0x90, 0x91
+DTS_CODINGS = (CODING_DTS, CODING_DTSHD, CODING_DTSHD_MA)
+
+# sampling_frequency of a sound track (bluray.h): 48, 96 and 192 kHz, and
+# 96 or 192 kHz over a 48 kHz core (a DTS core runs at 48 kHz at most)
+RATE_CODES = {48000: 1, 96000: 4, 192000: 5}
+CORE_RATE_CODES = {96000: 14, 192000: 12}
 
 # ISO 639-1 -> ISO 639-2/B (the disc's codes)
 LANGS = {
@@ -67,4 +78,19 @@ def lang3(code):
     return LANGS.get((code or "").lower(), "und")
 
 
-CODECS = {"ac3": CODING_AC3, "lpcm": CODING_LPCM, "dts": CODING_DTS}
+CODECS = {"ac3": CODING_AC3, "lpcm": CODING_LPCM, "dts": CODING_DTS, "dtshd": CODING_DTSHD,
+          "dtshd_ma": CODING_DTSHD_MA}
+# the codings a track may have above 48 kHz
+HIGH_RATE_CODINGS = (CODING_LPCM, CODING_DTSHD, CODING_DTSHD_MA)
+
+
+def rate_code(coding, rate=48000):
+    """A sound track's sampling_frequency code; a DTS-HD track above 48 kHz
+    has its 48 kHz core's code."""
+    if rate != 48000 and coding not in HIGH_RATE_CODINGS:
+        raise BdmvError(f"{rate} Hz: only LPCM and DTS-HD tracks go above 48 kHz")
+    if coding in (CODING_DTSHD, CODING_DTSHD_MA) and rate in CORE_RATE_CODES:
+        return CORE_RATE_CODES[rate]
+    if rate not in RATE_CODES:
+        raise BdmvError(f"{rate} Hz: a sound track runs at 48, 96 or 192 kHz")
+    return RATE_CODES[rate]

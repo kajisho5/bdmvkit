@@ -17,11 +17,11 @@ import shutil
 
 from .clip import clpi
 from .errors import BdmvError
-from .formats import CODING_AC3, video_codes
+from .formats import AUDIO_PID, CODING_AC3, DTS_CODINGS, video_codes
 from .hdmv import (add, goto, if_at_least, if_equal, if_not_equal, index_bdmv, jump_object,
                    jump_title, jump_title_reg, move, movie_objects, play_pl, play_pl_mark, resume,
                    rnd, set_button, set_streams, set_subtitles)
-from .m2ts import scan_m2ts
+from .m2ts import scan_m2ts, set_stream_types, stream_pids
 from .playlist import mpls
 from .program import parse_action, transition_key
 from .uops import mask
@@ -67,7 +67,7 @@ class Piece:
     clip: str             # clip name, e.g. "00001"
     video_format: int
     frame_rate: int
-    audio: list           # [(coding, channels, lang3)]
+    audio: list           # [(coding, channels, lang3, rate)]
     pg: list              # subtitle tracks [lang3]
     marks: list           # chapter starts, 45 kHz on the clip's time line
     end: int              # end of the clip, 45 kHz
@@ -332,21 +332,26 @@ def write_program(program, out_dir, move=True):
         dest = os.path.join(out_dir, "BDMV", "STREAM", f"{name}.m2ts")
         if os.path.abspath(src) != os.path.abspath(dest):
             place(src, dest)
+        return dest
 
     pieces, chapters = {}, []
     for n, t in enumerate(p.titles, 1):
         name = f"{n:05d}"
         scan = scan_m2ts(t.clip)
         video_format, frame_rate = _codes(t.fps, p)
-        audio = [(a.coding, a.channels, a.lang) for a in t.audio]
+        audio = [(a.coding, a.channels, a.lang, a.rate) for a in t.audio]
         pg = [s.lang for s in t.subtitles]
         marks = chapter_marks(t.chapters, scan)
         chapters.append(len(marks))
         pieces[t.id] = Piece(name, video_format, frame_rate, audio, pg, marks,
                              scan.end_pts // 2, ig=t.popup, hold=t.hold, uo=mask(t.prohibit))
+        types = audio_stream_types(t)
         _write(out_dir, os.path.join("CLIPINF", f"{name}.clpi"),
                clpi(scan, video_format, frame_rate, audio, pg, ig=t.popup))
-        clip(t.clip, name)
+        if types:
+            set_stream_types(clip(t.clip, name), types)
+        else:
+            clip(t.clip, name)
     for a in p.actions():
         kind, tid, c = parse_action(a)
         if kind == "chapter" and c > chapters[p.titles.index(p.title(tid))]:
@@ -402,6 +407,26 @@ def write_program(program, out_dir, move=True):
     return {"titles": len(nav.titles),
             "playlists": [f"{n:05d}.mpls" for n in range(1, len(nav.titles) + 1)],
             "chapters": chapters}
+
+
+def audio_stream_types(title):
+    """{PID: stream type} the title's clip needs changed so that its sound
+    tracks are marked as the title declares them. ffmpeg marks DTS by its
+    channels (0x85 above 6, else 0x82), not by the extensions it carries, so
+    a DTS track takes the declared DTS, DTS-HD or DTS-HD Master Audio type; a
+    track of another kind than declared is an error."""
+    have = stream_pids(title.clip)
+    out = {}
+    for k, a in enumerate(title.audio):
+        got = have.get(AUDIO_PID + k)
+        if got is None or got == a.coding:
+            continue
+        if got in DTS_CODINGS and a.coding in DTS_CODINGS:
+            out[AUDIO_PID + k] = a.coding
+        else:
+            raise BdmvError(f"title {title.id!r}: sound track {k + 1} has stream type "
+                            f"{got:#04x} in {title.clip}, not the declared {a.coding:#04x}")
+    return out
 
 
 def _parts(p, nav, kind, ident, pieces):

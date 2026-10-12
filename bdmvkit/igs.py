@@ -209,28 +209,8 @@ def ig_stream(buttons, frame_rate, default=None, popup=False, button_offset=0,
 def patch_ig_stream_type(path, pmt_pid=PMT_PID, pid=IG_PID):
     """ffmpeg muxes the IG stream as a PGS stream (stream type 0x90): mark it
     0x91 in every PMT of the clip (and fix the section CRC)."""
-    with open(path, "r+b") as f:
-        data = bytearray(f.read())
-        for off in range(0, len(data), 192):
-            p = off + 4
-            if (data[p + 1] & 0x1F) << 8 | data[p + 2] != pmt_pid or not data[p + 1] & 0x40:
-                continue
-            q = p + 4
-            if data[p + 3] & 0x20:
-                q += 1 + data[q]
-            q += 1 + data[q]                                # pointer field
-            length = (data[q + 1] & 0x0F) << 8 | data[q + 2]
-            end = q + 3 + length - 4
-            info = (data[q + 10] & 0x0F) << 8 | data[q + 11]
-            e = q + 12 + info
-            while e < end:
-                es_pid = (data[e + 1] & 0x1F) << 8 | data[e + 2]
-                if es_pid == pid:
-                    data[e] = CODING_IG
-                e += 5 + ((data[e + 3] & 0x0F) << 8 | data[e + 4])
-            data[end:end + 4] = crc32(bytes(data[q:end])).to_bytes(4, "big")
-        f.seek(0)
-        f.write(data)
+    from .m2ts import set_stream_types
+    set_stream_types(path, {pid: CODING_IG}, pmt_pid)
 
 
 def crc32(data):

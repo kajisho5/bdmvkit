@@ -32,7 +32,7 @@ def ep_map(entries):
 
 def clpi(scan, video_format, frame_rate, audio, pg=(), ig=False):
     """Clip information of one .m2ts: its streams, time span and EP map.
-    audio: [(coding, channels, lang3)]; pg: [lang3]; ig: menu buttons."""
+    audio: [(coding, channels, lang3[, rate])]; pg: [lang3]; ig: menu buttons."""
     ts_type = bytes([0x80]) + b"HDMV" + bytes(9) + bytes(16)
     info = _u16(0) + _u8(1) + _u8(1) + _u32(0) + _u32(TS_RATE) + _u32(scan.packets) + \
         bytes(128) + _u16(len(ts_type)) + ts_type

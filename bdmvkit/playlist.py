@@ -1,7 +1,7 @@
 """Playlists (.mpls): play items with their streams, and chapter marks."""
 
 from .formats import (AUDIO_PID, CODING_H264, CODING_IG, CODING_PG, IG_PID, PG_PID, VERSION,
-                      VIDEO_PID)
+                      VIDEO_PID, rate_code)
 from .hdmv import _u8, _u16, _u32
 
 
@@ -10,9 +10,10 @@ def _video_attr(video_format, frame_rate):
 
 
 def _audio_attr(track):
-    coding, channels, lang = track
+    """(coding, channels, lang3[, rate]): the rate 48000 unless given."""
+    coding, channels, lang, *rate = track
     fmt = 6 if channels > 2 else 3
-    return bytes([coding, fmt << 4 | 1]) + lang.encode("ascii")
+    return bytes([coding, fmt << 4 | rate_code(coding, *rate)]) + lang.encode("ascii")
 
 
 def _pg_attr(lang, coding=CODING_PG):
@@ -22,7 +23,7 @@ def _pg_attr(lang, coding=CODING_PG):
 def mpls(items, marks, uo=0):
     """A playlist. items: [(clip name, in, out, video_format, frame_rate,
     audio, pg, ig, still[, uo])] played one after the other, times in 45 kHz
-    on each clip's time line, audio [(coding, channels, lang3)], pg [lang3]
+    on each clip's time line, audio [(coding, channels, lang3, rate)], pg [lang3]
     (subtitles), ig: the clip carries menu buttons, still: 2 holds the
     last picture (a still menu), (1, s) holds it for s seconds, uo: the
     item's UO mask; marks: chapter marks as (item index, time); uo: the
