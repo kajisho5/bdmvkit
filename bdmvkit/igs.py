@@ -34,7 +34,7 @@ DIRECTIONS = ("up", "down", "left", "right")
 @dataclasses.dataclass
 class Button:
     id: str
-    x: int                      # top-left on the 1920 x 1080 frame
+    x: int                      # top-left on the frame (1920 x 1080, or 1280 x 720)
     y: int
     w: int
     h: int
@@ -124,10 +124,12 @@ def _objects(oid, w, h, pixels):
 
 
 def ig_stream(buttons, frame_rate, default=None, popup=False, button_offset=0,
-              follow_selection=False):
+              follow_selection=False, size=(WIDTH, HEIGHT)):
     """The buttons as an IG stream (.sup layout: "PG" segments).
 
-    frame_rate: the menu clip's frame rate code (formats.FORMATS);
+    frame_rate: the menu clip's frame rate code (formats.FORMATS, or
+    FORMATS_720 with size (1280, 720)); size: the video's frame, which the
+    buttons are placed on;
     default: the id of the button selected when the menu starts (the
     first); follow_selection: keep the player's selection instead (a menu
     entered with a chosen button, set_button before playing it);
@@ -137,9 +139,10 @@ def ig_stream(buttons, frame_rate, default=None, popup=False, button_offset=0,
     ids = [b.id for b in buttons]
     if len(set(ids)) != len(ids):
         raise BdmvError("button ids must be unique")
+    width, height = size
     for b in buttons:
-        if b.x < 0 or b.y < 0 or b.x + b.w > WIDTH or b.y + b.h > HEIGHT:
-            raise BdmvError(f"button {b.id!r} is not inside the {WIDTH} x {HEIGHT} frame")
+        if b.x < 0 or b.y < 0 or b.x + b.w > width or b.y + b.h > height:
+            raise BdmvError(f"button {b.id!r} is not inside the {width} x {height} frame")
         for name in ("selected", "activated", "normal"):
             pic = getattr(b, name)
             if pic is not None and len(pic) != b.w * b.h * 4:
@@ -194,7 +197,7 @@ def ig_stream(buttons, frame_rate, default=None, popup=False, button_offset=0,
     # multiplexed; always on, or a pop-up (the Pop-up key shows it); no time-outs
     body = bytes([0x40 if popup else 0x00]) + bytes(10)
     body += (0).to_bytes(3, "big") + bytes([1]) + page     # no user time-out; one page
-    ics = struct.pack(">HHB", WIDTH, HEIGHT, frame_rate << 4)
+    ics = struct.pack(">HHB", width, height, frame_rate << 4)
     ics += struct.pack(">HB", 0, 0x80)                     # composition 0, epoch start
     ics += bytes([0xC0]) + len(body).to_bytes(3, "big") + body
     if len(ics) > pgs.MAX_SEGMENT:

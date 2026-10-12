@@ -18,14 +18,14 @@ only to encode.
 
 日本語の説明は [README.ja.md](README.ja.md) にあります。
 
-**Status: 0.5.** Titles with chapters, sound and subtitle tracks;
+**Status: 0.6.** Titles with chapters, sound and subtitle tracks;
 playlists (in order, at random or shuffled) and play all; menus whose
 buttons start titles, chapters, playlists and other menus, switch sound and
 subtitle tracks, or open a menu on a chosen button; loop counts, end-action
 overrides, link transitions, remote keys a title turns off, and 720p. This
 navigation is the one [oncemore](https://github.com/kajisho5/oncemore)
 writes, byte for byte. 0.4 adds pop-up menus over a playing title, 0.5
-menus with motion or music.
+menus with motion or music, 0.6 button streams for 720p menus.
 
 ## Why
 
@@ -100,7 +100,8 @@ actions: `title:<n>`, `chapter:<n>:<c>`, `playlist:<id>`, `playall`,
 `resume`, `audio:<n>`, `subtitle:<n>` or `subtitle:off`, and `stop`. The
 arrow keys go to the nearest button that way unless a button's `nav` says
 (`{"down": "scene2"}`). `bdmvkit.igs` makes the button stream on its own,
-for other tools.
+for other tools: `igs.ig_stream(buttons, frame_rate, size=(1280, 720))`
+places the buttons on a 720p menu.
 
 ```python
 disc = Disc(title_key="menu:main")
