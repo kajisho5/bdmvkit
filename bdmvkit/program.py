@@ -74,6 +74,10 @@ class Title:
     end: str = None              # action after it (None: stop)
     prohibit: list = dataclasses.field(default_factory=list)           # uops.KEYS names
     popup: bool = False          # its clip carries a pop-up menu (an IG stream)
+    popup_buttons: list = dataclasses.field(default_factory=list)
+    # (Buttons of a pop-up menu the Program writes into the clip, as
+    # Disc.add_popup does; empty when the clip's IG stream is made elsewhere
+    # from a menu's buttons)
     hold: bool = False           # each chapter a picture held until Next (a slideshow)
 
 
@@ -147,7 +151,14 @@ class Program:
             if m.loop is not None:
                 out.append(m.end)
         out += [t.end for t in self.titles] + [p.end for p in self.playlists]
+        for t in self.titles:
+            out += [b.action for b in t.popup_buttons] + [b.override for b in t.popup_buttons]
         return [a for a in out if a]
+
+    def buttons(self):
+        """Every button: the menus', then the pop-up menus' of the titles."""
+        return [b for m in self.menus for b in m.buttons] + \
+            [b for t in self.titles for b in t.popup_buttons]
 
     @property
     def uses_playall(self):
@@ -157,7 +168,7 @@ class Program:
     def overrides(self):
         """End-action overrides buttons use, in a fixed order (1-based numbers
         in the override register)."""
-        return sorted({b.override for m in self.menus for b in m.buttons if b.override})
+        return sorted({b.override for b in self.buttons() if b.override})
 
     @property
     def link_transitions(self):
@@ -221,6 +232,11 @@ class Program:
                 if b.transition and b.transition not in self.transitions:
                     raise BdmvError(f"menu {m.id!r}, button {b.id!r}: no transition "
                                     f"{b.transition!r}")
+        for t in self.titles:
+            for b in t.popup_buttons:
+                if b.transition:
+                    raise BdmvError(f"title {t.id!r}: a pop-up menu's button ({b.id!r}) "
+                                    "cannot play a transition")
 
 
 def transition_key(button):
