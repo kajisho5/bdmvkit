@@ -39,8 +39,8 @@ import tempfile
 from . import clip as clip_info
 from . import encode, hdmv, igs, playlist
 from .errors import BdmvError
-from .formats import CODECS, FORMATS, HEIGHT, WIDTH, lang3
-from .m2ts import scan_m2ts
+from .formats import AUDIO_PID, CODECS, FORMATS, HEIGHT, PG_PID, WIDTH, lang3
+from .m2ts import scan_m2ts, stream_pids
 
 DIRS = ["BDMV/PLAYLIST", "BDMV/CLIPINF", "BDMV/STREAM", "BDMV/AUXDATA", "BDMV/BDJO",
         "BDMV/JAR", "BDMV/META", "BDMV/BACKUP/PLAYLIST", "BDMV/BACKUP/CLIPINF",
@@ -90,6 +90,18 @@ def chapter_marks(chapters, scan):
         if near // 2 > marks[-1]:
             marks.append(near // 2)
     return marks
+
+
+def _check_streams(n, title):
+    """The title's sound and subtitle tracks must be in its clip, with the
+    PIDs the playlist gives them (encode.encode_clip makes them so)."""
+    pids = stream_pids(title.clip)
+    want = [("audio", AUDIO_PID, k) for k in range(len(title.audio))] + \
+        [("subtitle", PG_PID, k) for k in range(len(title.subtitles))]
+    for kind, first, k in want:
+        if first + k not in pids:
+            raise BdmvError(f"title {n}: {kind} track {k + 1} is not in {title.clip} "
+                            f"(no stream with PID {first + k:#06x})")
 
 
 def _write(out_dir, rel, data):
@@ -179,6 +191,7 @@ class Disc:
         for n, t in enumerate(self.titles, 1):
             name = f"{n:05d}"
             scan = scan_m2ts(t.clip)
+            _check_streams(n, t)
             video_format, frame_rate = FORMATS[t.fps]
             audio = [(CODECS[c], ch, _lang(lang)) for c, ch, lang in t.audio]
             pg = [_lang(lang) for lang in t.subtitles]
