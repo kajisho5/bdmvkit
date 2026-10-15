@@ -18,14 +18,15 @@ only to encode.
 
 日本語の説明は [README.ja.md](README.ja.md) にあります。
 
-**Status: 0.6.** Titles with chapters, sound and subtitle tracks;
+**Status: 0.7.** Titles with chapters, sound and subtitle tracks;
 playlists (in order, at random or shuffled) and play all; menus whose
 buttons start titles, chapters, playlists and other menus, switch sound and
 subtitle tracks, or open a menu on a chosen button; loop counts, end-action
 overrides, link transitions, remote keys a title turns off, and 720p. This
 navigation is the one [oncemore](https://github.com/kajisho5/oncemore)
 writes, byte for byte. 0.4 adds pop-up menus over a playing title, 0.5
-menus with motion or music, 0.6 button streams for 720p menus.
+menus with motion or music, 0.6 button streams for 720p menus, 0.7 DTS-HD
+sound tracks.
 
 ## Why
 
@@ -77,6 +78,18 @@ disc.add_title("feature.m2ts", audio=[("ac3", 2, "en"), ("lpcm", 2, "en"), ("ac3
 ```
 
 `Disc.write` checks that every track a title declares is in its clip.
+
+DTS copied with its extensions is declared as what it is: `"dtshd"` (DTS-HD
+High Resolution Audio) or `"dtshd_ma"` (DTS-HD Master Audio), with its
+sampling rate when it is above 48 kHz (`("dtshd_ma", 8, "en", 96000)`;
+LPCM may run at 96 or 192 kHz too). ffmpeg marks a DTS stream in the clip by
+its channels, not by its extensions, so `Disc.write` marks each DTS track
+with the type the title declares, in the copy it puts on the disc:
+
+```python
+encode_clip("feature.mkv", "feature.m2ts", audio=[AudioTrack("feature.mkv", "copy", 8)])
+disc.add_title("feature.m2ts", audio=[("dtshd_ma", 8, "en")])
+```
 
 A menu is a picture and its buttons. Each button is a picture of how it
 looks when selected (and, if given, when activated and before it is
@@ -165,7 +178,8 @@ How the disc is laid out:
   progressive frames in a 1080i stream, as the format asks. A program can
   also be 720p (23.976, 50, 59.94; 25 and 29.97 go on at twice their rate);
   `encode_clip` makes 1080 clips.
-* Sound is AC-3, LPCM or DTS.
+* Sound is AC-3, LPCM, DTS, DTS-HD High Resolution Audio or DTS-HD Master
+  Audio (a DTS-HD track above 48 kHz is marked as such over its 48 kHz core).
 * Subtitles are PGS streams muxed into the clip. `pgs.write_sup` makes them
   from pictures, and `encode_clip(..., sups=[...])` muxes them in.
 * First play and the Top Menu key open the first menu, or start title 1

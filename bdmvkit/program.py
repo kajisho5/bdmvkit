@@ -24,6 +24,7 @@ Actions are strings:
 import dataclasses
 
 from .errors import BdmvError
+from .formats import rate_code
 from .uops import KEYS
 
 
@@ -51,10 +52,12 @@ def parse_action(s):
 class Audio:
     """A sound track as the playlist declares it (the clip carries it with
     PID AUDIO_PID + its index, as encode.encode_clip muxes it)."""
-    coding: int                  # formats.CODING_AC3, CODING_LPCM or CODING_DTS
+    coding: int                  # formats.CODING_AC3, CODING_LPCM, CODING_DTS,
+                                 # CODING_DTSHD or CODING_DTSHD_MA
     channels: int = 2
     lang: str = "und"            # ISO 639-2 ("eng")
     default: bool = False        # the disc starts with it (first play)
+    rate: int = 48000            # 96000 or 192000: LPCM and DTS-HD only
 
 
 @dataclasses.dataclass
@@ -223,6 +226,12 @@ class Program:
             for it in p.items:
                 if it.title not in titles:
                     raise BdmvError(f"playlist {p.id!r}: no title {it.title!r}")
+        for t in self.titles:
+            for k, a in enumerate(t.audio, 1):
+                try:
+                    rate_code(a.coding, a.rate)
+                except BdmvError as e:
+                    raise BdmvError(f"title {t.id!r}, sound track {k}: {e.message}") from e
         for x in self.titles + self.menus:
             for k in x.prohibit:
                 if k not in KEYS:

@@ -100,3 +100,52 @@ def stream_pids(path, pmt_pid=PMT_PID):
                 e += 5 + ((pkt[e + 3] & 0x0F) << 8 | pkt[e + 4])
             return pids
     raise BdmvError(f"{path}: no program map table (PID {pmt_pid:#06x})")
+
+
+def set_stream_types(path, types, pmt_pid=PMT_PID, chunk=1 << 22):
+    """Give the elementary streams their stream types `types` ({PID: type})
+    in every program map table of the clip, in place, with the section CRC
+    made again. The clip is read a piece at a time and only its PMT packets
+    are written, so a long clip costs no more memory than a short one."""
+    from .igs import crc32
+    head = bytes([0x47, 0x40 | pmt_pid >> 8, pmt_pid & 0xFF])     # (a section starts in it)
+    chunk -= chunk % 192
+    with open(path, "r+b") as f:
+        pos = 0
+        while (data := f.read(chunk)):
+            i = data.find(head)
+            while i >= 0:
+                start = i - 4                                   # (the 4-byte packet header)
+                if start >= 0 and start % 192 == 0 and start + 192 <= len(data):
+                    pkt = bytearray(data[start:start + 192])
+                    if _retype(pkt, types, crc32):
+                        f.seek(pos + start)
+                        f.write(pkt)
+                        f.seek(pos + len(data))
+                i = data.find(head, i + 1)
+            pos += len(data)
+
+
+def _retype(pkt, types, crc32):
+    """Set the stream types in one PMT packet; whether it changed."""
+    p = 4
+    q = p + 4
+    if pkt[p + 3] & 0x20:
+        q += 1 + pkt[q]
+    q += 1 + pkt[q]                                     # pointer field
+    if pkt[q] != 2:                                     # (not a PMT section)
+        return False
+    end = q + 3 + ((pkt[q + 1] & 0x0F) << 8 | pkt[q + 2]) - 4
+    if end + 4 > len(pkt):
+        raise BdmvError("a program map table runs over its packet")
+    e = q + 12 + ((pkt[q + 10] & 0x0F) << 8 | pkt[q + 11])
+    changed = False
+    while e < end:
+        pid = (pkt[e + 1] & 0x1F) << 8 | pkt[e + 2]
+        if pid in types and pkt[e] != types[pid]:
+            pkt[e] = types[pid]
+            changed = True
+        e += 5 + ((pkt[e + 3] & 0x0F) << 8 | pkt[e + 4])
+    if changed:
+        pkt[end:end + 4] = crc32(bytes(pkt[q:end])).to_bytes(4, "big")
+    return changed

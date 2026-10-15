@@ -197,6 +197,7 @@ class Disc:
                "audio": [(clip.audio_streams[i].coding_type, clip.audio_streams[i].format,
                           clip.audio_streams[i].lang.decode())
                          for i in range(clip.audio_stream_count)],
+               "audio_rate": [clip.audio_streams[i].rate for i in range(clip.audio_stream_count)],
                "pg": [(clip.pg_streams[i].coding_type, clip.pg_streams[i].lang.decode())
                       for i in range(clip.pg_stream_count)]}
         self.lib.bd_free_title_info(p)
