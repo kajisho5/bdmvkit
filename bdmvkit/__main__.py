@@ -2,6 +2,7 @@
 
     bdmvkit encode SOURCE CLIP.m2ts [--fps 24000/1001] [--chapters 0,60,120] [--fast]
     bdmvkit build DISC.json OUT_DIR
+    bdmvkit contract [--json]
 
 DISC.json: {"titles": [{"clip": "a.m2ts", "fps": "24000/1001",
 "chapters": [0, 60], "audio": [["ac3", 2, "en"]], "subtitles": ["ja"],
@@ -24,6 +25,7 @@ import os
 import sys
 
 from . import __version__
+from .contract import contract
 from .disc import Disc, MenuButton
 from .encode import encode_clip
 from .errors import BdmvError
@@ -52,7 +54,12 @@ def main(argv=None):
     s.add_argument("disc", help="the disc description (JSON)")
     s.add_argument("out", help="the folder to write BDMV into")
     s.add_argument("--fast", action="store_true", help="quick encoding of the menus")
+    s = sub.add_parser("contract", help="print the machine-readable contract (JSON)")
+    s.add_argument("--json", action="store_true", help="accepted; the output is always JSON")
     args = p.parse_args(argv)
+    if args.command == "contract":
+        print(json.dumps(contract(), indent=2))
+        return 0
     try:
         if args.command == "encode":
             encode_clip(args.source, args.clip, fps=_fps(args.fps),

@@ -21,7 +21,7 @@ Not reachable from the agent; encodes with ffmpeg directly.
 
 ## Steps
 
-- [ ] **1. (optional) Contract in the OS schema** — skill_id, version, provides[]
+- [x] **1. (optional) Contract in the OS schema** — skill_id, version, provides[]
   - Done when: validates against the OS schema
 
 ## Boundaries
