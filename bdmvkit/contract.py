@@ -34,7 +34,7 @@ def contract():
             "disc images (udfkit)",
             "burning a disc",
             "DVD-Video (vtskit, oncemore)",
-            "AACS or other copy protection",
+            "copy protection of any kind",
             "network access of any kind",
         ],
         "tools": TOOLS,
