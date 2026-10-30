@@ -159,6 +159,7 @@ menu's buttons run, for tools that make their own IG streams.
 ```sh
 bdmvkit encode feature.mov feature.m2ts --chapters 0,300,600
 bdmvkit build disc.json out
+bdmvkit contract --json      # machine-readable contract (AI Video Production OS registry)
 ```
 
 `disc.json` looks like this:
