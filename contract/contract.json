@@ -1,0 +1,73 @@
+{
+  "skill_id": "bdmvkit",
+  "id": "bdmvkit",
+  "version": "0.7.1",
+  "contract_version": "1.0",
+  "provides": [
+    {
+      "id": "bluray.encode_clip",
+      "lifecycle": "EXPERIMENTAL",
+      "tool_id": "bdmvkit/encode"
+    },
+    {
+      "id": "bluray.author",
+      "lifecycle": "EXPERIMENTAL",
+      "tool_id": "bdmvkit/build"
+    }
+  ],
+  "dependencies": [],
+  "external_tools": [
+    {
+      "id": "ffmpeg",
+      "required": true,
+      "detail": "with libx264; encodes clips and menus"
+    }
+  ],
+  "not_provided": [
+    "disc images (udfkit)",
+    "burning a disc",
+    "DVD-Video (vtskit, oncemore)",
+    "copy protection of any kind",
+    "network access of any kind"
+  ],
+  "tools": [
+    {
+      "tool_id": "bdmvkit/encode",
+      "kind": "cli",
+      "writes_media": true,
+      "mutates_input": false,
+      "description": "Encode a video into a Blu-ray clip (.m2ts) with ffmpeg + x264",
+      "argv": [
+        "encode",
+        "<source>",
+        "<clip.m2ts>",
+        "[--fps 24000/1001|25|30000/1001]",
+        "[--chapters 0,60,120]",
+        "[--fast]"
+      ]
+    },
+    {
+      "tool_id": "bdmvkit/build",
+      "kind": "cli",
+      "writes_media": true,
+      "mutates_input": false,
+      "description": "Write a BDMV folder (playlists, clip information, HDMV navigation, menus, PGS subtitles) from encoded clips and a disc description",
+      "argv": [
+        "build",
+        "<disc.json>",
+        "<out_dir>",
+        "[--fast]"
+      ]
+    }
+  ],
+  "python_api": "bdmvkit.Disc",
+  "execution": {
+    "canonical_invocation": [
+      "bdmvkit",
+      "contract",
+      "--json"
+    ],
+    "network": false,
+    "shell": false
+  }
+}

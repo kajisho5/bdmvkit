@@ -162,6 +162,11 @@ bdmvkit build disc.json out
 bdmvkit contract --json      # machine-readable contract (AI Video Production OS registry)
 ```
 
+`contract/contract.json` is that contract committed as a file (the `contract --json` output,
+unchanged), so any release's contract is `git show vX.Y.Z:contract/contract.json`, with nothing
+installed or run. Regenerate it with `python contract/generate.py` after a contract change or a
+version bump; a unit test fails when it is stale.
+
 `disc.json` looks like this:
 
 ```json
