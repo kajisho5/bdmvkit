@@ -18,7 +18,7 @@ only to encode.
 
 日本語の説明は [README.ja.md](README.ja.md) にあります。
 
-**Status: 0.7.** Titles with chapters, sound and subtitle tracks;
+**Status: 0.8.** Titles with chapters, sound and subtitle tracks;
 playlists (in order, at random or shuffled) and play all; menus whose
 buttons start titles, chapters, playlists and other menus, switch sound and
 subtitle tracks, or open a menu on a chosen button; loop counts, end-action
@@ -26,7 +26,7 @@ overrides, link transitions, remote keys a title turns off, and 720p. This
 navigation is the one [oncemore](https://github.com/kajisho5/oncemore)
 writes, byte for byte. 0.4 adds pop-up menus over a playing title, 0.5
 menus with motion or music, 0.6 button streams for 720p menus, 0.7 DTS-HD
-sound tracks.
+sound tracks, 0.8 bit-rate plans for proceedings discs.
 
 ## Why
 
@@ -159,6 +159,7 @@ menu's buttons run, for tools that make their own IG streams.
 ```sh
 bdmvkit encode feature.mov feature.m2ts --chapters 0,300,600
 bdmvkit build disc.json out
+bdmvkit plan sessions.txt --disc bd50 --duration 6:00:00   # bit rates for a day of sessions
 bdmvkit contract --json      # machine-readable contract (AI Video Production OS registry)
 ```
 
@@ -177,6 +178,36 @@ version bump; a unit test fails when it is stale.
                          "action": "title:1"}]}],
  "play_all": true}
 ```
+
+A proceedings disc (a conference or company event, 2 to 8 hours of
+sessions on one disc) starts from a plan: `bdmvkit plan` reads a chapter
+list, one `H:MM:SS Title` line per session (a YouTube chapter list, or
+slide-sync-skill's `--chapters-out`) or JSON (`{"sessions": [{"title",
+"start", "end", "floor"}], "duration"}`), and gives every session a title
+(or, with `--mode chapters`, a chapter of one title), the video bit rate
+each gets on a BD-25 or BD-50, its quality floor and whether it is above
+it, and a menu entry from its session title:
+
+```sh
+bdmvkit plan sessions.txt --disc bd50 --duration 6:00:00 --floor 6M > plan.json
+```
+
+```python
+from bdmvkit import plan_disc
+from bdmvkit.plan import read_chapters
+
+plan = plan_disc(read_chapters("sessions.txt", duration=6 * 3600), disc="bd50")
+plan["all_above_floor"], plan["titles"][0]["video_bps"], plan["menu"][0]
+# (True, 16457005, {'label': 'Opening remarks', 'action': 'title:1'})
+encode_clip("session1.mp4", "session1.m2ts", bitrate=plan["titles"][0]["video_bps"])
+```
+
+A title below its floor is named in `warnings` (and on standard error;
+the command exits 1), with how many discs the floors need and where to
+split the sessions (`split_at_floor`). A session can carry a floor of its
+own; it is met first and the others share the rest. How the numbers are
+worked out, and where they come from: [docs/PLANNING.md](docs/PLANNING.md).
+The plan does not cut the recording or draw the menu pictures.
 
 How the disc is laid out:
 

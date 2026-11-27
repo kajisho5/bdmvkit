@@ -18,9 +18,11 @@ from .formats import (AUDIO_PID, FORMATS, HEIGHT, IG_PID, MAX_VIDEO_BPS, PG_PID,
                       VBV_BUFFER, VIDEO_PID, WIDTH)
 
 
-def video_args(fps, max_bps=MAX_VIDEO_BPS, fast=False, keys=()):
+def video_args(fps, max_bps=MAX_VIDEO_BPS, fast=False, keys=(), bitrate=None):
     """x264 options for a Blu-ray video stream at `fps` ((num, den)); `keys`:
-    times (s) to make key frames, e.g. the chapters."""
+    times (s) to make key frames, e.g. the chapters. `bitrate`: an average
+    video bit rate (bit/s) to encode at, e.g. plan.plan_disc's, instead of a
+    constant quality; the peak stays at `max_bps`."""
     if fps not in FORMATS:
         raise BdmvError(f"{fps[0]}/{fps[1]} fps has no Blu-ray format "
                         f"(use one of {', '.join(f'{a}/{b}' for a, b in FORMATS)})")
@@ -29,8 +31,11 @@ def video_args(fps, max_bps=MAX_VIDEO_BPS, fast=False, keys=()):
             "force-cfr=1")
     if FORMATS[fps][0] == 4:
         x264 += ":fake-interlaced=1:pic-struct=1"
+    if bitrate is not None and not 0 < bitrate <= max_bps:
+        raise BdmvError(f"a video bit rate of {bitrate} bit/s is outside 1 to {max_bps}")
+    rate = ["-b:v", str(int(bitrate))] if bitrate else ["-crf", "24" if fast else "19"]
     args = ["-c:v", "libx264", "-preset", "ultrafast" if fast else "medium",
-            "-crf", "24" if fast else "19", "-profile:v", "high", "-level", "4.1",
+            *rate, "-profile:v", "high", "-level", "4.1",
             "-maxrate", str(max_bps), "-bufsize", str(VBV_BUFFER), "-x264-params", x264,
             "-r", f"{fps[0]}/{fps[1]}", "-pix_fmt", "yuv420p", "-aspect", "16:9",
             "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
@@ -73,7 +78,7 @@ class AudioTrack:
 
 
 def encode_clip(source, out, fps=(24000, 1001), chapters=(), audio="ac3", channels=2,
-                sups=(), max_bps=MAX_VIDEO_BPS, fast=False, ffmpeg=None):
+                sups=(), max_bps=MAX_VIDEO_BPS, fast=False, ffmpeg=None, bitrate=None):
     """Encode `source` (any video ffmpeg reads) into the Blu-ray clip `out`.
     `audio`: a codec ("ac3", "lpcm", "copy") for one track of the first audio
     stream of `source`, or a list of AudioTracks, one track each (track k
@@ -82,7 +87,9 @@ def encode_clip(source, out, fps=(24000, 1001), chapters=(), audio="ac3", channe
     picture is made up with silence; the clip ends with the picture.
     `chapters`: times (s) that become key frames, so
     chapter marks land on them. `sups`: PGS streams (.sup, e.g. from
-    pgs.write_sup) muxed in as subtitle tracks."""
+    pgs.write_sup) muxed in as subtitle tracks. `bitrate`: the average video
+    bit rate (bit/s) a disc plan gives the title (plan.plan_disc), instead of
+    constant quality."""
     ffmpeg = ffmpeg or shutil.which("ffmpeg")
     if not ffmpeg:
         raise BdmvError("encoding needs ffmpeg (with libx264)")
@@ -120,7 +127,7 @@ def encode_clip(source, out, fps=(24000, 1001), chapters=(), audio="ac3", channe
     cmd += ["-filter_complex", ";".join(graph), "-map", "[v]"] + sound
     for k in range(len(sups)):
         cmd += ["-map", f"{first_sup + k}:s:0"]
-    cmd += video_args(fps, max_bps, fast, [t for t in chapters if t > 0]) + codecs
+    cmd += video_args(fps, max_bps, fast, [t for t in chapters if t > 0], bitrate) + codecs
     if sups:
         cmd += ["-c:s", "copy"]
     cmd += ["-streamid", f"0:{VIDEO_PID}"]
