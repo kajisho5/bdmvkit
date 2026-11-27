@@ -31,7 +31,10 @@ than one of slides); a title whose floor is above the share gets its floor,
 and the others share what is left. When the floors cannot all be met,
 every title gets the same share and each title below its floor is named,
 with how many discs the floors need and where to split the sessions
-(in order, a new disc when the next session would not fit at its floor).
+(in order, a new disc when the next session would not fit at its floor;
+a session larger than a disc at its floor is named as one to split). With
+`--mode chapters` the sessions are one title and one encode, so they all get
+the same rate, and a session whose floor is above it is named.
 
 **Floor.** 6 Mbit/s for 1080 H.264 by default (`--floor`). It is a
 starting point for slides and speakers, not a measured quality threshold;

@@ -92,6 +92,20 @@ class TestShares(unittest.TestCase):
         self.assertEqual(plan["disc_titles"][0]["chapters"][:3], [0, 900, 3900])
         self.assertEqual(plan["menu"][1], {"label": "Keynote: Heart failure today", "action": "chapter:1:2"})
 
+    def test_chapters_mode_holds_every_session_to_the_one_rate(self):
+        sessions = read_chapters(DAY, duration=SIX_HOURS)
+        sessions[2]["floor"] = 25_000_000
+        plan = plan_disc(sessions, disc="bd50", mode="chapters")
+        rates = {t["video_bps"] for t in plan["titles"]}
+        self.assertEqual(rates, {plan["disc_titles"][0]["video_bps"]})
+        self.assertEqual(plan["below_floor"], [3])
+        self.assertFalse(plan["all_above_floor"])
+
+    def test_discs_needed_follow_the_split(self):
+        sessions = parse_chapters("0:00 A\n1:00:00 B\n2:00:00 C\n", duration=3 * 3600)
+        plan = plan_disc(sessions, disc="bd25", floor="30M")
+        self.assertEqual(plan["discs_needed_at_floor"], len(plan["split_at_floor"]))
+
     def test_menu_entries_come_from_the_session_titles(self):
         plan = plan_disc(read_chapters(DAY, duration=SIX_HOURS), disc="bd50")
         self.assertEqual(plan["menu"][0], {"label": "Opening remarks", "action": "title:1"})
@@ -114,6 +128,8 @@ class TestChapterLists(unittest.TestCase):
         self.assertEqual([r["title"] for r in rows], ["Session 1", "Session 2"])
 
     def test_errors(self):
+        with self.assertRaises(BdmvError):
+            parse_chapters('{"sessions": [{"start": null}], "duration": 10}')
         with self.assertRaises(BdmvError):
             parse_chapters("0:00 A\n")                       # no end for the last
         with self.assertRaises(BdmvError):

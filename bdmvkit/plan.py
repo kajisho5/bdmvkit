@@ -64,7 +64,7 @@ def _seconds(value):
     if not m:
         try:
             return float(value)
-        except ValueError:
+        except (ValueError, TypeError):
             raise BdmvError(f"{value!r} is not a time (seconds, or H:MM:SS)") from None
     return int(m.group(1) or 0) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
 
@@ -184,7 +184,11 @@ def plan_disc(sessions, disc="bd50", mode="titles", floor=None, audio_bps=192_00
     warnings = []
     if budget <= 0:
         raise BdmvError(f"{total / 3600:.1f} h of sound alone does not fit on a {disc.upper()}")
-    rates = [min(r, peak) for r in _share(budget, sessions, floors)]
+    if mode == "chapters":
+        # one title, one encode: every session at the same rate
+        rates = [min(budget / total, peak)] * len(sessions)
+    else:
+        rates = [min(r, peak) for r in _share(budget, sessions, floors)]
 
     titles = []
     for k, (s, rate, fl) in enumerate(zip(sessions, rates, floors), 1):
@@ -204,20 +208,24 @@ def plan_disc(sessions, disc="bd50", mode="titles", floor=None, audio_bps=192_00
     else:
         first = titles[0]["start"]
         entries = [{"label": t["title"], "action": f"chapter:1:{t['session']}"} for t in titles]
-        # one title at one rate: the lowest of the shares (a single encode)
-        rate = min(t["video_bps"] for t in titles)
+        rate = titles[0]["video_bps"]
         disc_titles = [{"sessions": [t["session"] for t in titles],
                         "chapters": [round(t["start"] - first, 3) for t in titles], "video_bps": rate}]
         if len(titles) > MAX_CHAPTERS:
             warnings.append(f"{len(titles)} chapters: more than the {MAX_CHAPTERS} players are known to accept")
 
+    split = _split(sessions, floors, audio_bps, usable) if below else None
     need = sum(_bytes(fl, audio_bps, s["seconds"]) for s, fl in zip(sessions, floors))
-    discs_needed = max(1, math.ceil(need / usable))
+    discs_needed = max(len(split or [()]), math.ceil(need / usable))
     for t in below:
         warnings.append(f"session {t['session']} ({t['title']!r}): {t['video_bps'] / 1e6:.2f} Mbit/s, below its "
                         f"floor of {t['floor_bps'] / 1e6:.2f} Mbit/s")
     if below:
         warnings.append(f"at their floors the sessions need {discs_needed} {disc.upper()} discs")
+        for s_, fl in zip(sessions, floors):
+            if _bytes(fl, audio_bps, s_["seconds"]) > usable:
+                warnings.append(f"{s_['title']!r} alone is larger than a {disc.upper()} at its floor: "
+                                "it has to be split into parts")
     return {
         "disc": disc, "mode": mode, "capacity_bytes": CAPACITY[disc], "reserve": reserve,
         "usable_bytes": usable, "planned_bytes": used, "seconds": round(total, 3),
@@ -225,7 +233,7 @@ def plan_disc(sessions, disc="bd50", mode="titles", floor=None, audio_bps=192_00
         "below_floor": [t["session"] for t in below],
         "titles": titles, "disc_titles": disc_titles, "menu": entries,
         "discs_needed_at_floor": discs_needed,
-        "split_at_floor": _split(sessions, floors, audio_bps, usable) if below else None,
+        "split_at_floor": split,
         "warnings": warnings,
         "assumptions": {"mux_overhead": MUX_OVERHEAD, "max_video_bps": max_video_bps, "max_ts_bps": MAX_TS_BPS},
     }
