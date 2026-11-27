@@ -9,12 +9,15 @@
 * `bdmvkit.igs`: a menu's buttons as an Interactive Graphics stream.
 * `bdmvkit.encode.encode_clip`: a clip encoded for Blu-ray with ffmpeg + x264.
 * `bdmvkit.pgs`: PGS subtitle streams (.sup) from pictures.
+* `bdmvkit.plan_disc`: the bit rates of a proceedings disc (sessions from a
+  chapter list on a BD-25 or BD-50, each above a quality floor or reported).
 * The files themselves: `playlist.mpls`, `clip.clpi`, `hdmv.index_bdmv`,
   `hdmv.movie_objects` and the HDMV navigation commands, `m2ts.scan_m2ts`.
 """
 
 from .disc import Disc, MenuButton
 from .errors import BdmvError
+from .plan import plan_disc
 
-__version__ = "0.7.1"
-__all__ = ["Disc", "MenuButton", "BdmvError"]
+__version__ = "0.8.0"
+__all__ = ["Disc", "MenuButton", "BdmvError", "plan_disc"]

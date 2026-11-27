@@ -2,6 +2,8 @@
 
     bdmvkit encode SOURCE CLIP.m2ts [--fps 24000/1001] [--chapters 0,60,120] [--fast]
     bdmvkit build DISC.json OUT_DIR
+    bdmvkit plan CHAPTERS [--disc bd25|bd50] [--mode titles|chapters] [--floor 6M]
+                 [--audio 192k] [--duration H:MM:SS] [--reserve 0.03]
     bdmvkit contract [--json]
 
 DISC.json: {"titles": [{"clip": "a.m2ts", "fps": "24000/1001",
@@ -17,6 +19,10 @@ title "default_audio", "default_subtitle", "prohibit" and "popup" ({"buttons":
 [...], "default"}: its pop-up menu, buttons as a menu's). The disc may have
 "playlists" ([{"id", "items": [n or [n, first, last]], "order", "end"}]),
 "first_play" and "title_key".
+
+CHAPTERS: "H:MM:SS Title" lines, one per session, or JSON ({"sessions":
+[{"title", "start", "end", "floor"}], "duration"}); plan prints the plan as
+JSON (plan.plan_disc) and exits 1 when a title is below its floor.
 """
 
 import argparse
@@ -29,6 +35,7 @@ from .contract import contract
 from .disc import Disc, MenuButton
 from .encode import encode_clip
 from .errors import BdmvError
+from .plan import plan_disc, read_chapters
 
 
 def _fps(text):
@@ -54,6 +61,15 @@ def main(argv=None):
     s.add_argument("disc", help="the disc description (JSON)")
     s.add_argument("out", help="the folder to write BDMV into")
     s.add_argument("--fast", action="store_true", help="quick encoding of the menus")
+    s = sub.add_parser("plan", help="plan the bit rates of a disc of sessions from a chapter list")
+    s.add_argument("chapters", help="chapter list: H:MM:SS Title lines, or JSON")
+    s.add_argument("--disc", default="bd50", choices=["bd25", "bd50"])
+    s.add_argument("--mode", default="titles", choices=["titles", "chapters"],
+                   help="each session a title (default) or a chapter of one title")
+    s.add_argument("--floor", help="the lowest video bit rate a title may have (default 6M)")
+    s.add_argument("--audio", default="192k", help="sound bit rate per title (default 192k)")
+    s.add_argument("--duration", help="where the last session ends (H:MM:SS or seconds)")
+    s.add_argument("--reserve", type=float, default=0.03, help="share of the disc kept free (0.03)")
     s = sub.add_parser("contract", help="print the machine-readable contract (JSON)")
     s.add_argument("--json", action="store_true", help="accepted; the output is always JSON")
     args = p.parse_args(argv)
@@ -61,6 +77,15 @@ def main(argv=None):
         print(json.dumps(contract(), indent=2))
         return 0
     try:
+        if args.command == "plan":
+            from .plan import _seconds
+            duration = _seconds(args.duration) if args.duration else None
+            plan = plan_disc(read_chapters(args.chapters, duration), disc=args.disc, mode=args.mode,
+                             floor=args.floor, audio_bps=args.audio, reserve=args.reserve)
+            print(json.dumps(plan, indent=2, ensure_ascii=False))
+            for w in plan["warnings"]:
+                print(f"bdmvkit: note: {w}", file=sys.stderr)
+            return 0 if plan["all_above_floor"] and plan["fits"] else 1
         if args.command == "encode":
             encode_clip(args.source, args.clip, fps=_fps(args.fps),
                         chapters=_times(args.chapters), fast=args.fast)

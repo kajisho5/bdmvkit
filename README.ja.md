@@ -12,7 +12,7 @@
 
 ffmpeg と x264 を使い、Blu-ray 向けの設定でクリップをエンコードする機能もあります。標準ライブラリ以外に依存せず、ffmpeg が必要なのはエンコードのときだけです。
 
-**状態：0.7。** チャプター・音声・字幕付きのタイトル、プレイリスト（順番・ランダム・シャッフル）と全再生、ボタンでタイトル・チャプター・プレイリスト・別のメニューへ移ったり音声と字幕を切り替えたり、選ぶボタンを指定してメニューを開いたりするメニューを作れます。ループ回数、終了時の移動先の上書き、リンクのトランジション、タイトルごとに使えなくするリモコンキー、720p にも対応します。このナビゲーションは [oncemore](https://github.com/kajisho5/oncemore) が書くものとバイト単位で同じです。0.4 で再生中のタイトルに重ねるポップアップメニューに、0.5 で動きや音楽のあるメニューに、0.6 で 720p メニューのボタンストリームに、0.7 で DTS-HD の音声トラックに対応しました。
+**状態：0.8。** チャプター・音声・字幕付きのタイトル、プレイリスト（順番・ランダム・シャッフル）と全再生、ボタンでタイトル・チャプター・プレイリスト・別のメニューへ移ったり音声と字幕を切り替えたり、選ぶボタンを指定してメニューを開いたりするメニューを作れます。ループ回数、終了時の移動先の上書き、リンクのトランジション、タイトルごとに使えなくするリモコンキー、720p にも対応します。このナビゲーションは [oncemore](https://github.com/kajisho5/oncemore) が書くものとバイト単位で同じです。0.4 で再生中のタイトルに重ねるポップアップメニューに、0.5 で動きや音楽のあるメニューに、0.6 で 720p メニューのボタンストリームに、0.7 で DTS-HD の音声トラックに、0.8 で記録ディスクのビットレート計画に対応しました。
 
 ## なぜ作ったか
 
@@ -115,8 +115,25 @@ disc.add_popup(a, [
 ```sh
 bdmvkit encode feature.mov feature.m2ts --chapters 0,300,600
 bdmvkit build disc.json out
+bdmvkit plan sessions.txt --disc bd50 --duration 6:00:00   # bit rates for a day of sessions
 bdmvkit contract --json      # machine-readable contract (AI Video Production OS registry)
 ```
+
+学会や企業イベントの記録ディスク（2〜8 時間のセッションを 1 枚に収めるもの）は、計画から始めます。`bdmvkit plan` はチャプター一覧（セッションごとに `H:MM:SS タイトル` の 1 行。YouTube のチャプター一覧や slide-sync-skill の `--chapters-out`）か JSON（`{"sessions": [{"title", "start", "end", "floor"}], "duration"}`）を読み、セッションごとにタイトル（`--mode chapters` なら 1 つのタイトルのチャプター）を割り当て、BD-25 / BD-50 でそれぞれに使える映像ビットレート、画質の下限とそれを上回るかどうか、セッション名からのメニュー項目を出します。
+
+```sh
+bdmvkit plan sessions.txt --disc bd50 --duration 6:00:00 --floor 6M > plan.json
+```
+
+```python
+from bdmvkit import plan_disc
+from bdmvkit.plan import read_chapters
+
+plan = plan_disc(read_chapters("sessions.txt", duration=6 * 3600), disc="bd50")
+encode_clip("session1.mp4", "session1.m2ts", bitrate=plan["titles"][0]["video_bps"])
+```
+
+下限を下回るタイトルは `warnings`（と標準エラー。終了コードは 1）に名前で出し、下限を守るのに何枚要るか、どこで分けるか（`split_at_floor`）も示します。セッションごとに下限を指定でき、それを先に満たしてから残りを他のセッションで分けます。計算のしかたと数値の出典は [docs/PLANNING.md](docs/PLANNING.md) にあります。録画の切り出しとメニュー画像の作成はしません。
 
 ディスクの作りは次のとおりです。
 
